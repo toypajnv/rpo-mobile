@@ -1,0 +1,1 @@
+<resources><style name="Theme.RpoMobile" parent="android:style/Theme.Material.Light.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:colorAccent">#0D63E6</item><item name="android:navigationBarColor">#FFFFFF</item><item name="android:statusBarColor">#073C77</item><item name="android:windowLightStatusBar">false</item></style></resources>
