@@ -1,0 +1,41 @@
+name: Publish existing APK
+
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-existing-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download successful APK artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          gh run download 31829699070 --repo "$GITHUB_REPOSITORY" --name rpo-mobile-debug-15 --dir out
+          find out -type f -maxdepth 2 -print
+          APK=$(find out -type f -name '*.apk' | head -n 1)
+          test -n "$APK"
+          cp "$APK" rpo-mobile-test.apk
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.1.0-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v0.1.0-test rpo-mobile-test.apk --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create v0.1.0-test rpo-mobile-test.apk \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "RPO Mobile — Test 0.1.0" \
+              --notes "Тестовая debug-сборка для первого этапа проверки интерфейса и логики приложения." \
+              --prerelease
+          fi
