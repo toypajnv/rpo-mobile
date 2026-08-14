@@ -3,6 +3,14 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val configuredServerUrl = (
+    providers.gradleProperty("RPO_SERVER_URL").orNull
+        ?: System.getenv("RPO_SERVER_URL")
+        ?: ""
+).trim()
+val serverUrl = (if (configuredServerUrl.isNotEmpty()) configuredServerUrl else "http://10.0.2.2:8000/")
+    .let { if (it.endsWith("/")) it else "$it/" }
+
 android {
     namespace = "ru.rpo.mobile"
     compileSdk = 35
@@ -11,9 +19,9 @@ android {
         applicationId = "ru.rpo.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
-        buildConfigField("String", "SERVER_URL", "\"http://10.0.2.2:8000/\"")
+        versionCode = 2
+        versionName = "1.0.1"
+        buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
     }
 
     compileOptions {

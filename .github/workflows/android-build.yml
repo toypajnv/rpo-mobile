@@ -19,6 +19,8 @@ jobs:
   build-debug-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      RPO_SERVER_URL: ${{ secrets.RPO_SERVER_URL }}
 
     steps:
       - name: Checkout

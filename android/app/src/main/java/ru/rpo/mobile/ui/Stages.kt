@@ -1,20 +1,54 @@
 package ru.rpo.mobile.ui
 
-enum class StageKind { DATETIME, TEXT }
-data class Stage(val key: String, val title: String, val kind: StageKind = StageKind.DATETIME, val commentRequired: Boolean = false)
+enum class StageKind { RANGE_DATETIME, DATETIME, STOP, EXTENSION_DATE }
+
+data class StageEvent(val key: String, val title: String)
+
+data class Stage(
+    val id: String,
+    val title: String,
+    val kind: StageKind,
+    val first: StageEvent,
+    val second: StageEvent? = null,
+)
 
 val stages = listOf(
-    Stage("AT", "Начало подготовки"),
-    Stage("AU", "Окончание подготовки"),
-    Stage("AV", "Передача ОП к ОБПР"),
-    Stage("AX", "Допуск со стороны допускающего"),
-    Stage("AY", "Фактическое начало работ"),
-    Stage("AZ", "Остановка работ", commentRequired = true),
-    Stage("BA", "Возобновление работ"),
-    Stage("BC", "Фактическое завершение РПО"),
-    Stage("BD", "Мероприятия по завершению"),
-    Stage("BE", "Продление РПО", kind = StageKind.TEXT),
-    Stage("BF", "Передача объекта"),
-    Stage("BG", "Закрытие ЭНД", kind = StageKind.TEXT),
-    Stage("BH", "Передача площадки эксплуатирующей организации"),
+    Stage(
+        id = "PREPARATION",
+        title = "Подготовка",
+        kind = StageKind.RANGE_DATETIME,
+        first = StageEvent("AT", "Начало подготовки"),
+        second = StageEvent("AU", "Окончание подготовки"),
+    ),
+    Stage(
+        id = "START_WORK",
+        title = "Передача и начало работ",
+        kind = StageKind.RANGE_DATETIME,
+        first = StageEvent("AV", "Передача ОП к ОБПР"),
+        second = StageEvent("AY", "Фактическое начало работ"),
+    ),
+    Stage(
+        id = "STOP_WORK",
+        title = "Остановка работ",
+        kind = StageKind.STOP,
+        first = StageEvent("AZ", "Остановка работ"),
+    ),
+    Stage(
+        id = "RESUME_WORK",
+        title = "Возобновление работ",
+        kind = StageKind.DATETIME,
+        first = StageEvent("BA", "Возобновление работ"),
+    ),
+    Stage(
+        id = "FINISH_WORK",
+        title = "Завершение РПО",
+        kind = StageKind.DATETIME,
+        first = StageEvent("BC", "Фактическое завершение РПО"),
+    ),
+    Stage(
+        id = "EXTEND_WORK",
+        title = "Продление РПО",
+        kind = StageKind.EXTENSION_DATE,
+        first = StageEvent("BE", "Продление РПО"),
+    ),
 )
