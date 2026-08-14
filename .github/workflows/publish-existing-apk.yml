@@ -39,3 +39,5 @@ jobs:
               --notes "Тестовая debug-сборка для первого этапа проверки интерфейса и логики приложения." \
               --prerelease
           fi
+
+# Triggered after workflow registration.
