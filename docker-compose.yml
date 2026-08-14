@@ -21,7 +21,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       SECRET_KEY: ${SECRET_KEY:-change_me_please}
       DATABASE_URL: postgresql+psycopg://rpo:${POSTGRES_PASSWORD:-change_me}@db:5432/rpo
