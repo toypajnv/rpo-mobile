@@ -1,0 +1,15 @@
+STAGES = {
+    "AT": {"label": "Начало подготовки", "order": 10, "kind": "datetime"},
+    "AU": {"label": "Окончание подготовки", "order": 20, "kind": "datetime", "after": "AT"},
+    "AV": {"label": "Передача ОП к ОБПР", "order": 30, "kind": "datetime", "after": "AU"},
+    "AX": {"label": "Допуск со стороны допускающего", "order": 40, "kind": "datetime"},
+    "AY": {"label": "Фактическое начало работ", "order": 50, "kind": "datetime", "after": "AV"},
+    "AZ": {"label": "Остановка работ", "order": 60, "kind": "datetime", "after": "AY", "comment_required": True},
+    "BA": {"label": "Возобновление работ", "order": 70, "kind": "datetime", "after": "AZ"},
+    "BC": {"label": "Фактическое завершение РПО", "order": 80, "kind": "datetime", "after": "AY"},
+    "BD": {"label": "Выполнение мероприятий по завершению", "order": 90, "kind": "datetime", "after": "BC"},
+    "BE": {"label": "Продление РПО", "order": 95, "kind": "text"},
+    "BF": {"label": "Выполнение мероприятий по передаче объекта", "order": 100, "kind": "datetime", "after": "BD"},
+    "BG": {"label": "Закрытие ЭНД", "order": 105, "kind": "text"},
+    "BH": {"label": "Передача площадки эксплуатирующей организации", "order": 110, "kind": "datetime", "after": "BF"},
+}

@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rpo
+      POSTGRES_USER: rpo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpo -d rpo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-change_me_please}
+      DATABASE_URL: postgresql+psycopg://rpo:${POSTGRES_PASSWORD:-change_me}@db:5432/rpo
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+      MAIL_MODE: ${MAIL_MODE:-file}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-rpo@example.ru}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      EXPORT_DIR: /app/data/exports
+      OUTBOX_DIR: /app/data/outbox
+    volumes:
+      - server_data:/app/data
+
+volumes:
+  postgres_data:
+  server_data:
