@@ -19,25 +19,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p out
-          gh run download 31829699070 --repo "$GITHUB_REPOSITORY" --name rpo-mobile-debug-15 --dir out
+          gh run download 31831959014 --repo "$GITHUB_REPOSITORY" --name rpo-mobile-debug-17 --dir out
           find out -type f -maxdepth 2 -print
           APK=$(find out -type f -name '*.apk' | head -n 1)
           test -n "$APK"
-          cp "$APK" rpo-mobile-test.apk
+          cp "$APK" rpo-mobile-1.0.1.apk
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.0-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload v0.1.0-test rpo-mobile-test.apk --clobber --repo "$GITHUB_REPOSITORY"
+          if gh release view v1.0.1-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.0.1-test rpo-mobile-1.0.1.apk --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create v0.1.0-test rpo-mobile-test.apk \
+            gh release create v1.0.1-test rpo-mobile-1.0.1.apk \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "RPO Mobile — Test 0.1.0" \
-              --notes "Тестовая debug-сборка для первого этапа проверки интерфейса и логики приложения." \
+              --title "RPO Mobile — Test 1.0.1" \
+              --notes "Тестовая сборка РПО Mobile 1.0.1 для проверки обновлённого интерфейса и логики приложения." \
               --prerelease
           fi
 
-# Triggered after workflow registration.
+# Publish APK build 17 as public release asset.
