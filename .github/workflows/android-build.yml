@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'android/**'
+      - '.github/keys/rpo-test.keystore.b64'
       - '.github/workflows/android-build.yml'
   pull_request:
     paths:
       - 'android/**'
+      - '.github/keys/rpo-test.keystore.b64'
       - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
@@ -39,6 +41,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+
+      - name: Prepare stable test signing key
+        shell: bash
+        run: |
+          base64 --decode .github/keys/rpo-test.keystore.b64 > android/app/rpo-test.keystore
+          keytool -list -keystore android/app/rpo-test.keystore -storepass rpo-test-2026 -alias rpo-test >/dev/null
 
       - name: Build debug APK
         working-directory: android
