@@ -12,6 +12,10 @@ log() {
   printf '[%s] %s\n' "$(date -Is)" "$*"
 }
 
+git_safe() {
+  git -c safe.directory="$PROJECT_DIR" "$@"
+}
+
 healthcheck() {
   local attempt
   for attempt in $(seq 1 30); do
@@ -37,21 +41,20 @@ if [[ ! -d .git ]]; then
   exit 1
 fi
 
-# Runtime files are ignored; tracked source files must remain clean so an
-# automatic deployment never overwrites a manual hotfix silently.
-if ! git diff --quiet || ! git diff --cached --quiet; then
+# systemd starts this service as root while /opt/rpo is owned by the rpo user.
+# Use an explicit safe.directory only for this repository instead of weakening
+# Git ownership checks globally.
+if ! git_safe diff --quiet || ! git_safe diff --cached --quiet; then
   log "ERROR: tracked local changes detected. Automatic deployment stopped."
-  git status --short
+  git_safe status --short
   exit 1
 fi
 
-git fetch --quiet origin main
-CURRENT_SHA="$(git rev-parse HEAD)"
-TARGET_SHA="$(git rev-parse origin/main)"
+git_safe fetch --quiet origin main
+CURRENT_SHA="$(git_safe rev-parse HEAD)"
+TARGET_SHA="$(git_safe rev-parse origin/main)"
 DEPLOYED_SHA="$(cat "$STATE_FILE" 2>/dev/null || true)"
 
-# The state file tracks the commit actually rebuilt and health-checked. This
-# also makes the first bootstrap deployment work after the installer pulls main.
 if [[ "$DEPLOYED_SHA" == "$TARGET_SHA" ]]; then
   exit 0
 fi
@@ -70,7 +73,7 @@ fi
 
 rollback() {
   log "Deployment failed; rolling source back to $CURRENT_SHA"
-  git reset --hard "$CURRENT_SHA"
+  git_safe reset --hard "$CURRENT_SHA"
   docker compose up -d --build
   if healthcheck; then
     log "Rollback completed and health check is OK."
@@ -81,9 +84,9 @@ rollback() {
 
 trap 'rollback' ERR
 
-git checkout -q main
-if [[ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]]; then
-  git merge --ff-only origin/main
+git_safe checkout -q main
+if [[ "$(git_safe rev-parse HEAD)" != "$TARGET_SHA" ]]; then
+  git_safe merge --ff-only origin/main
 fi
 
 docker compose up -d --build
@@ -95,7 +98,7 @@ fi
 
 trap - ERR
 printf '%s\n' "$TARGET_SHA" > "$STATE_FILE"
-log "Deployment successful: $(git rev-parse --short HEAD)"
+log "Deployment successful: $(git_safe rev-parse --short HEAD)"
 
 # Keep two weeks of automatic SQL backups.
 find "$BACKUP_DIR" -type f -name 'rpo_*.sql.gz' -mtime +14 -delete || true
