@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>РПО Сервер</title><link rel="stylesheet" href="/static/app.css?v=20260815-3"></head>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>РПО Сервер</title><link rel="stylesheet" href="/static/app.css?v=20260815-4"></head>
 <body class="app-body">
 <aside class="sidebar">
   <div class="side-brand"><span>🏗️</span><div><b>РПО Сервер</b><small>Контроль этапов работ</small></div></div>
@@ -17,7 +17,6 @@
 <main class="main">
 <header><div><h1 id="page-title">Панель оператора</h1><p id="page-subtitle">Сводка по нарядам-допускам</p></div><div class="operator"><i></i><span>{{ operator.username }}</span><form method="post" action="/logout"><button class="link-button">Выйти</button></form></div></header>
 {% if request.query_params.get('export') == 'ok' %}<div class="alert success">Выгрузка отправлена одним письмом. Данные сохранены на сервере.</div>{% endif %}
-{% if request.query_params.get('export') == 'duplicate' %}<div class="alert success">Повторная отправка заблокирована: эта выгрузка уже была обработана.</div>{% endif %}
 
 <section class="tab-section" id="tab-home" data-tab="home">
   <section class="stats">
@@ -57,9 +56,9 @@
 
 <section class="tab-section" id="tab-works" data-tab="works" hidden>
   <article class="panel">
-    <div class="panel-title"><div><h2>Работы</h2><p class="muted panel-note">Одна строка — один наряд-допуск. Этапы объединены в текущую картину работы.</p></div><span class="online"><i></i> Онлайн</span></div>
-    <div class="table-wrap tall"><table><thead><tr><th>Обновлено</th><th>НД</th><th>Работник</th><th>Текущее состояние</th><th>Прогресс</th><th>Данные по этапам</th><th>Выгрузка</th></tr></thead><tbody id="works-body">
-      {% for e in works %}<tr><td>{{ e.updated_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><b>{{ e.permit_number }}</b></td><td><b>{{ e.worker_name }}</b></td><td><span class="work-state {{ e.status_class }}">{{ e.status }}</span></td><td><div class="progress"><span style="width:{{ e.progress }}%"></span></div><small>{{ e.stage_count }} этап(ов)</small></td><td class="summary-cell"><pre>{{ e.summary }}</pre>{% if e.comments %}<small class="row-comment">{{ e.comments }}</small>{% endif %}</td><td>{% if e.exported_at %}<span class="badge done">Выгружено</span>{% else %}<span class="badge pending">Не выгружено</span>{% endif %}</td></tr>{% endfor %}
+    <div class="panel-title"><div><h2>Работы</h2><p class="muted panel-note">Одна строка — один наряд-допуск. Подробности по этапам раскрываются по клику.</p></div><span class="online"><i></i> Онлайн</span></div>
+    <div class="table-wrap tall"><table><thead><tr><th>Обновлено</th><th>НД</th><th>Работник</th><th>Текущее состояние</th><th>Прогресс</th><th>Этапы</th><th>Выгрузка</th></tr></thead><tbody id="works-body">
+      {% for e in works %}<tr><td>{{ e.updated_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><b>{{ e.permit_number }}</b></td><td><b>{{ e.worker_name }}</b></td><td><span class="work-state {{ e.status_class }}">{{ e.status }}</span></td><td><div class="progress"><span style="width:{{ e.progress }}%"></span></div><small>{{ e.stage_count }} из {{ e.stage_total }}</small></td><td class="works-stage-cell"><details class="stage-details"><summary><span>{{ e.stage_count }} из {{ e.stage_total }} этапов</span><small>Показать детали</small></summary><div class="stage-detail-list">{% for s in e.stage_items %}<div class="stage-detail-line"><span><b>{{ s.label }}</b><small>{{ s.key }}</small></span><strong>{{ s.value }}</strong>{% if s.comment %}<em>{{ s.comment }}</em>{% endif %}</div>{% endfor %}</div></details></td><td>{% if e.exported_at %}<span class="badge done">Выгружено</span>{% else %}<span class="badge pending">Не выгружено</span>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
   </article>
 </section>
@@ -71,14 +70,14 @@
     <article><small>Остановлено</small><strong>{{ analytics.stopped }}</strong><span>требуют внимания</span></article>
     <article><small>Завершено</small><strong>{{ analytics.completed }}</strong><span>по этапу окончания</span></article>
     <article><small>Продлений</small><strong>{{ analytics.extended }}</strong><span>НД с продлением</span></article>
-    <article><small>Среднее время работ</small><strong>{% if analytics.avg_completion_hours is not none %}{{ analytics.avg_completion_hours }} ч{% else %}—{% endif %}</strong><span>от начала до окончания</span></article>
+    <article><small>Среднее время работ</small><strong>{{ analytics.avg_completion_label }}</strong><span>от начала до окончания</span></article>
   </section>
   <section class="analytics-grid">
     <article class="panel"><div class="panel-title"><div><h2>Активность за 7 дней</h2><p class="muted panel-note">Количество сообщений от мобильных устройств</p></div></div>
       <div class="bar-chart">{% for p in analytics.activity_days %}<div class="bar-row"><span>{{ p.label }}</span><div><i style="width:{{ p.pct }}%"></i></div><b>{{ p.count }}</b></div>{% endfor %}</div>
     </article>
-    <article class="panel"><div class="panel-title"><div><h2>Заполнение этапов</h2><p class="muted panel-note">Доля НД, в которых присутствует этап</p></div></div>
-      <div class="bar-chart stage-chart">{% for p in analytics.stage_progress %}<div class="bar-row"><span title="{{ p.label }}">{{ p.key }}</span><div><i style="width:{{ p.pct }}%"></i></div><b>{{ p.count }}</b></div>{% else %}<p class="muted">Пока нет данных</p>{% endfor %}</div>
+    <article class="panel"><div class="panel-title"><div><h2>Заполнение этапов</h2><p class="muted panel-note">Доля НД, в которых присутствует основной этап</p></div></div>
+      <div class="bar-chart stage-chart">{% for p in analytics.stage_progress %}<div class="bar-row"><span title="{{ p.key }}">{{ p.label }}</span><div><i style="width:{{ p.pct }}%"></i></div><b>{{ p.count }}</b></div>{% else %}<p class="muted">Пока нет данных</p>{% endfor %}</div>
     </article>
     <article class="panel"><div class="panel-title"><div><h2>Работники по количеству НД</h2><p class="muted panel-note">Топ-5 за весь период</p></div></div>
       <div class="leader-list">{% for p in analytics.top_workers %}<div><span><b>{{ loop.index }}</b>{{ p.name }}</span><strong>{{ p.count }}</strong></div>{% else %}<p class="muted">Пока нет данных</p>{% endfor %}</div>
@@ -97,7 +96,7 @@
       <label>Email получателя<input type="email" name="recipient" id="recipient" placeholder="operator@example.ru" required></label>
       <div class="presets"><button type="button" data-period="today">Сегодня</button><button type="button" data-period="shift">Смена</button><button type="button" data-period="week">Неделя</button></div>
       <button class="primary" type="submit">👁 Просмотреть перед отправкой</button>
-    </form><div class="info-box">ⓘ В окне проверки каждый НД показан одной строкой. ФИО, этапы и комментарии можно отредактировать до отправки.</div></article>
+    </form><div class="info-box">ⓘ В окне проверки каждый НД показан одной строкой. Ранее выгруженные НД тоже можно выбрать и отправить повторно. ФИО, этапы и комментарии можно отредактировать до отправки.</div></article>
     <article class="panel"><h2>История выгрузок</h2><div class="export-list">{% for x in exports %}<div><span><b>№{{ x.id }}</b> · {{ x.created_at.astimezone().strftime('%d.%m.%Y %H:%M') }}<small>{{ x.event_count }} НД → {{ x.recipient }}</small></span><span class="badge {% if x.status in ['sent','saved_to_outbox'] %}done{% else %}pending{% endif %}">{{ 'Отправлено' if x.status == 'sent' else ('Сформировано' if x.status == 'saved_to_outbox' else x.status) }}</span></div>{% else %}<p class="muted">Выгрузок пока нет</p>{% endfor %}</div></article>
   </section>
 </section>
@@ -139,4 +138,4 @@
     </form>
   </section>
 </div>
-<script src="/static/dashboard.js?v=20260815-3"></script></body></html>
+<script src="/static/dashboard.js?v=20260815-4"></script></body></html>
