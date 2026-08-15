@@ -1,0 +1,16 @@
+[Unit]
+Description=RPO automatic deployment from GitHub main
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/rpo
+ExecStart=/opt/rpo/ops/autodeploy.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target
