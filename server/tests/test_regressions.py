@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -15,7 +16,7 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.main import ensure_permit_records, mobile_history, _record_state, _analytics_context
+from app.main import ensure_permit_records, mobile_history, _record_state, _analytics_context, _work_view, export_preview, send_export_confirmed
 from app.models import MobileEvent, PermitRecord
 from app.services.exporter import build_export
 from app.services.mailer import send_export
@@ -127,7 +128,49 @@ class PermitRegressionTests(unittest.TestCase):
         self.assertEqual(analytics["active"], 1)
         self.assertEqual(analytics["extended"], 1)
         self.assertEqual(analytics["avg_completion_hours"], 4.0)
+        self.assertEqual(analytics["avg_completion_label"], "4.0 ч")
         self.assertEqual(analytics["top_workers"][0], {"name": "Иванов", "count": 2})
+        self.assertTrue(all(item["key"] != "AX" for item in analytics["stage_progress"]))
+
+    def test_work_progress_uses_only_operator_visible_stages(self) -> None:
+        record = self._record(1, "34567", "Иванов", {
+            "AT": {"field_value": "1"},
+            "AU": {"field_value": "2"},
+            "AV": {"field_value": "3"},
+            "AY": {"field_value": "4"},
+            "BC": {"field_value": "5"},
+            "AX": {"field_value": "legacy hidden stage"},
+        })
+        view = _work_view(record)
+        self.assertEqual(view["stage_count"], 5)
+        self.assertEqual(view["stage_total"], 8)
+        self.assertEqual({item["key"] for item in view["stage_items"]}, {"AT", "AU", "AV", "AY", "BC"})
+        self.assertNotIn("AX", {item["key"] for item in view["stage_items"]})
+
+    def test_export_preview_includes_previously_exported_permit(self) -> None:
+        now = datetime.now(timezone.utc)
+        record = self._record(1, "34567", "Иванов", {
+            "AT": {"field_value": "15.08.2026 11:31", "comment": ""},
+        })
+        record.exported_at = now - timedelta(minutes=5)
+        with SessionLocal() as db:
+            db.add(record)
+            db.commit()
+            preview = export_preview(
+                period_from=(now - timedelta(hours=1)).isoformat(),
+                period_to=(now + timedelta(hours=1)).isoformat(),
+                operator=None,
+                db=db,
+            )
+
+        self.assertEqual(len(preview["records"]), 1)
+        self.assertEqual(preview["records"][0]["permit_number"], "34567")
+        self.assertTrue(preview["records"][0]["previously_exported"])
+        self.assertEqual(preview["stage_keys"], ["AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC"])
+
+        send_source = inspect.getsource(send_export_confirmed)
+        self.assertNotIn("exported_at.is_(None)", send_source)
+        self.assertNotIn("export=duplicate", send_source)
 
     def _records(self) -> list[PermitRecord]:
         return [
@@ -248,9 +291,15 @@ class DashboardStaticTests(unittest.TestCase):
         self.assertIn('data-tab-link="transmissions"', template)
         self.assertIn('data-tab-link="works"', template)
         self.assertIn("Один наряд-допуск — одна строка", template)
-        self.assertIn("dashboard.js?v=", template)
-        self.assertIn("app.css?v=", template)
+        self.assertIn("Ранее выгруженные НД тоже можно", template)
+        self.assertIn("dashboard.js?v=20260815-4", template)
+        self.assertIn("app.css?v=20260815-4", template)
         self.assertIn("preview-table", script)
+        self.assertIn("stageDetails", script)
+        self.assertIn("Показать детали", script)
+        self.assertIn("За выбранный период нет нарядов-допусков.", script)
+        self.assertNotIn("нет невыгруженных нарядов-допусков", script)
+        self.assertIn("window.scrollTo", script)
         self.assertIn("exportForm?.addEventListener('submit'", script)
         self.assertIn("modal.hidden=false", script.replace(" ", ""))
         self.assertIn("/api/operator/transmissions", script)
