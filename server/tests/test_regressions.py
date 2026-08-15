@@ -154,7 +154,7 @@ class DashboardStaticTests(unittest.TestCase):
         ):
             self.assertIn(element_id, template)
         self.assertIn("dashboard.js?v=", template)
-        self.assertIn("exportForm.addEventListener('submit'", script)
+        self.assertIn("exportForm?.addEventListener('submit'", script)
         self.assertIn("modal.hidden=false", script.replace(" ", ""))
 
 
