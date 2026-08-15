@@ -17,17 +17,27 @@ const tabMeta = {
 };
 function activateTab(name, updateHash=true){
   if(!tabMeta[name]) name='home';
+  const current=document.querySelector('[data-tab]:not([hidden])')?.dataset.tab;
   document.querySelectorAll('[data-tab]').forEach(s=>{s.hidden=s.dataset.tab!==name});
   document.querySelectorAll('[data-tab-link]').forEach(a=>a.classList.toggle('active',a.dataset.tabLink===name));
   const title=document.querySelector('#page-title'), subtitle=document.querySelector('#page-subtitle');
   if(title) title.textContent=tabMeta[name][0];
   if(subtitle) subtitle.textContent=tabMeta[name][1];
   if(updateHash && location.hash!==`#${name}`) history.replaceState(null,'',`${location.pathname}${location.search}#${name}`);
+  if(current!==name) requestAnimationFrame(()=>window.scrollTo({top:0,left:0,behavior:'auto'}));
 }
 document.querySelectorAll('[data-tab-link]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();activateTab(a.dataset.tabLink)}));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.addEventListener('click',()=>activateTab(b.dataset.openTab)));
 window.addEventListener('hashchange',()=>activateTab(location.hash.slice(1)||'home',false));
 activateTab(location.hash.slice(1)||'home',false);
+
+function stageDetails(e){
+  const items=Array.isArray(e.stage_items)?e.stage_items:[];
+  const total=Number(e.stage_total)||items.length||1;
+  if(!items.length) return '<span class="muted">Этапы пока не заполнены</span>';
+  const lines=items.map(item=>`<div class="stage-detail-line"><span><b>${esc(item.label)}</b><small>${esc(item.key)}</small></span><strong>${esc(item.value)}</strong>${item.comment?`<em>${esc(item.comment)}</em>`:''}</div>`).join('');
+  return `<details class="stage-details"><summary><span>${items.length} из ${total} этапов</span><small>Показать детали</small></summary><div class="stage-detail-list">${lines}</div></details>`;
+}
 
 async function refreshWorks(){
   try{
@@ -35,7 +45,7 @@ async function refreshWorks(){
     const rows=await r.json();
     const body=document.querySelector('#works-body');
     if(!body)return;
-    body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.updated_at))}</td><td><b>${esc(e.permit_number)}</b></td><td><b>${esc(e.worker_name)}</b></td><td><span class="work-state ${esc(e.status_class)}">${esc(e.status)}</span></td><td><div class="progress"><span style="width:${Number(e.progress)||0}%"></span></div><small>${Number(e.stage_count)||0} этап(ов)</small></td><td class="summary-cell"><pre>${esc(e.summary)}</pre>${e.comments?`<small class="row-comment">${esc(e.comments)}</small>`:''}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td></tr>`).join('');
+    body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.updated_at))}</td><td><b>${esc(e.permit_number)}</b></td><td><b>${esc(e.worker_name)}</b></td><td><span class="work-state ${esc(e.status_class)}">${esc(e.status)}</span></td><td><div class="progress"><span style="width:${Number(e.progress)||0}%"></span></div><small>${Number(e.stage_count)||0} из ${Number(e.stage_total)||0}</small></td><td class="works-stage-cell">${stageDetails(e)}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td></tr>`).join('');
   }catch(e){console.error('refreshWorks',e)}
 }
 
@@ -48,6 +58,8 @@ async function refreshTransmissions(){
     body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.received_at))}</td><td><b>${esc(e.worker_name)}</b></td><td><b>${esc(e.permit_number)}</b></td><td><span class="stage-code">${esc(e.field_key)}</span> ${esc(e.stage_label)}</td><td>${esc(e.field_value)}</td><td class="wrap-cell">${esc(e.comment||'—')}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Ожидает'}</span></td></tr>`).join('');
   }catch(e){console.error('refreshTransmissions',e)}
 }
+refreshWorks();
+refreshTransmissions();
 setInterval(()=>{refreshWorks();refreshTransmissions()},5000);
 
 const pad=n=>String(n).padStart(2,'0');
@@ -80,13 +92,14 @@ function renderPreview(records, keys){
     const stages=keys.map(key=>{
       const f=r.fields[key]||{label:key,field_value:'',comment:''};
       return `<div class="preview-stage-line">
-        <span class="preview-stage-name"><b>${esc(key)}</b><small>${esc(f.label)}</small></span>
+        <span class="preview-stage-name"><b>${esc(f.label)}</b><small>${esc(key)}</small></span>
         <input data-ri="${ri}" data-key="${esc(key)}" data-kind="value" value="${esc(f.field_value)}" placeholder="Не заполнено">
         <input data-ri="${ri}" data-key="${esc(key)}" data-kind="comment" value="${esc(f.comment)}" placeholder="Комментарий">
       </div>`;
     }).join('');
+    const previous=r.previously_exported?`<span class="badge repeat">Ранее выгружено</span>`:`<span class="badge pending">Ещё не выгружалось</span>`;
     return `<tr data-ri="${ri}">
-      <td class="preview-nd"><strong>${esc(r.permit_number)}</strong><small>${esc(r.updated_at_display||fmt(r.updated_at))}</small></td>
+      <td class="preview-nd"><strong>${esc(r.permit_number)}</strong><small>${esc(r.updated_at_display||fmt(r.updated_at))}</small>${previous}</td>
       <td class="preview-worker"><input data-ri="${ri}" data-kind="worker" value="${esc(r.worker_name)}"></td>
       <td class="preview-stage-cell">${stages}</td>
     </tr>`;
@@ -123,7 +136,7 @@ exportForm?.addEventListener('submit',async e=>{
     let data={};
     try{data=await r.json()}catch(_){throw new Error('Сервер вернул некорректный ответ предпросмотра')}
     if(!r.ok) throw new Error(data.detail||'Не удалось сформировать предпросмотр');
-    if(!Array.isArray(data.records)||!data.records.length){alert('За выбранный период нет невыгруженных нарядов-допусков.');return;}
+    if(!Array.isArray(data.records)||!data.records.length){alert('За выбранный период нет нарядов-допусков.');return;}
     previewRecords=data.records; stageKeys=data.stage_keys||[];
     renderPreview(previewRecords,stageKeys);
     document.querySelector('#confirm-period-from').value=data.period_from;
