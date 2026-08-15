@@ -9,7 +9,14 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "ChangeMe123!"
 
-    mail_mode: str = "file"  # file | smtp
+    mail_mode: str = "file"  # file | resend | smtp
+
+    # Preferred production delivery: Resend HTTPS API.
+    resend_api_key: str = ""
+    resend_from: str = "РПО Сервер <rpo@rpo-mng.ru>"
+    resend_api_url: str = "https://api.resend.com/emails"
+
+    # SMTP is kept as an optional fallback/compatibility mode.
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
