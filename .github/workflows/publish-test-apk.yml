@@ -12,6 +12,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      RPO_SERVER_URL: https://rpo-mng.ru/
     defaults:
       run:
         working-directory: android
@@ -33,23 +35,33 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build debug APK
+      - name: Run Android unit tests before APK build
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Prepare stable test signing key
+        working-directory: .
+        shell: bash
+        run: |
+          base64 --decode .github/keys/rpo-test.keystore.b64 > android/app/rpo-test.keystore
+          keytool -list -keystore android/app/rpo-test.keystore -storepass rpo-test-2026 -alias rpo-test >/dev/null
+
+      - name: Build debug APK after tests
         run: gradle --no-daemon assembleDebug
 
       - name: Prepare release file
-        run: cp app/build/outputs/apk/debug/app-debug.apk ../rpo-mobile-test.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk ../rpo-mobile-1.1.1.apk
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: .
         run: |
-          if gh release view v0.1.0-test >/dev/null 2>&1; then
-            gh release upload v0.1.0-test rpo-mobile-test.apk --clobber
+          if gh release view v1.1.1-test >/dev/null 2>&1; then
+            gh release upload v1.1.1-test rpo-mobile-1.1.1.apk --clobber
           else
-            gh release create v0.1.0-test rpo-mobile-test.apk \
+            gh release create v1.1.1-test rpo-mobile-1.1.1.apk \
               --target "$GITHUB_SHA" \
-              --title "RPO Mobile — Test 0.1.0" \
-              --notes "Тестовая debug-сборка для первого этапа проверки интерфейса и логики приложения." \
+              --title "RPO Mobile — Test 1.1.1" \
+              --notes "Проверенная тестовая сборка РПО Mobile 1.1.1 для Android. Сервер: https://rpo-mng.ru/. Перед сборкой выполняются unit tests; APK подписан стабильным тестовым ключом." \
               --prerelease
           fi
