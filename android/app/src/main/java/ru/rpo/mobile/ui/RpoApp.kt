@@ -1,5 +1,6 @@
 package ru.rpo.mobile.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,6 +28,38 @@ private val Red = Color(0xFFD73535)
 private val Orange = Color(0xFFE98B00)
 
 enum class Tab { FORM, HISTORY, HELP }
+
+private fun stageMemoryKey(permitNumber: String): String =
+    "saved_stages_${permitNumber.trim().uppercase()}"
+
+private fun loadSavedStageIds(context: Context, permitNumber: String): Set<String> {
+    val permit = permitNumber.trim().uppercase()
+    if (permit.length < 3) return emptySet()
+    val prefs = context.getSharedPreferences("rpo", Context.MODE_PRIVATE)
+    return prefs.getStringSet(stageMemoryKey(permit), emptySet())?.toSet().orEmpty()
+}
+
+private fun persistSavedStageIds(context: Context, permitNumber: String, ids: Set<String>) {
+    val permit = permitNumber.trim().uppercase()
+    if (permit.length < 3) return
+    context.getSharedPreferences("rpo", Context.MODE_PRIVATE)
+        .edit()
+        .putStringSet(stageMemoryKey(permit), ids.toSet())
+        .apply()
+}
+
+private fun stageFingerprint(s: FormState): String = listOf(
+    s.stage.id,
+    s.primaryDate,
+    s.primaryTime,
+    s.secondaryDate,
+    s.secondaryTime,
+    s.thirdDate,
+    s.thirdTime,
+    s.extensionDate,
+    s.stopReason,
+    s.comment,
+).joinToString("|")
 
 @Composable
 fun RpoApp(vm: RpoViewModel = viewModel()) {
@@ -85,6 +119,43 @@ private fun Header() {
 
 @Composable
 private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: RpoViewModel) {
+    val context = LocalContext.current
+    val permitKey = s.permitNumber.trim().uppercase()
+    var savedStageIds by remember(permitKey) { mutableStateOf(loadSavedStageIds(context, permitKey)) }
+    var pendingStage by remember(permitKey) { mutableStateOf<Stage?>(null) }
+    var baseline by remember(permitKey, s.stage.id) { mutableStateOf(stageFingerprint(s)) }
+    val currentFingerprint = stageFingerprint(s)
+    val hasUnsavedChanges = currentFingerprint != baseline
+
+    pendingStage?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingStage = null },
+            icon = { Icon(Icons.Default.Warning, null, tint = Orange) },
+            title = { Text("Текущий этап не сохранён") },
+            text = {
+                Text(
+                    "В этапе «${s.stage.title}» есть изменения. Если переключиться сейчас, они будут сброшены. " +
+                        "Нажмите «Остаться и сохранить», затем кнопку «Сохранить этап»."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { pendingStage = null }) {
+                    Text("Остаться и сохранить", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        pendingStage = null
+                        vm.updateStage(target)
+                    }
+                ) {
+                    Text("Переключиться без сохранения", color = Red)
+                }
+            },
+        )
+    }
+
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp),
@@ -131,7 +202,30 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
 
         Field("ФИО работника", s.workerName, vm::updateWorker, "Например: Иванов И.И.", s.errors["worker"])
         PermitField(s.permitNumber, permitMemories, vm::updatePermit, vm::selectPermit, s.errors["permit"])
-        StagePicker(s.stage, vm::updateStage)
+        StagePicker(
+            selected = s.stage,
+            savedStageIds = savedStageIds,
+            hasUnsavedChanges = hasUnsavedChanges,
+            onSelect = { next ->
+                if (next.id != s.stage.id) {
+                    if (shouldWarnBeforeStageSwitch(s.stage, next, hasUnsavedChanges)) pendingStage = next
+                    else vm.updateStage(next)
+                }
+            },
+        )
+
+        Surface(color = Color(0xFFFFF7E8), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Default.Info, null, tint = Orange, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Каждый этап сохраняется отдельно. После заполнения нажмите «Сохранить этап». " +
+                        "Сохранённые этапы отмечаются зелёной галочкой и не потеряются при переключении.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF6F5200),
+                )
+            }
+        }
 
         when (s.stage.kind) {
             StageKind.RANGE_DATETIME -> {
@@ -237,15 +331,22 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
         }
 
         Button(
-            onClick = vm::send,
+            onClick = {
+                if (vm.send()) {
+                    val updated = savedStageIds + s.stage.id
+                    savedStageIds = updated
+                    persistSavedStageIds(context, permitKey, updated)
+                    baseline = currentFingerprint
+                }
+            },
             enabled = !s.sending,
             modifier = Modifier.fillMaxWidth().height(58.dp),
             shape = RoundedCornerShape(12.dp),
         ) {
             if (s.sending) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
-            else Icon(Icons.Default.Send, null)
+            else Icon(Icons.Default.Save, null)
             Spacer(Modifier.width(8.dp))
-            Text(if (s.sending) "Синхронизация..." else "Сохранить и отправить", fontWeight = FontWeight.Bold)
+            Text(if (s.sending) "Синхронизация..." else "Сохранить этап", fontWeight = FontWeight.Bold)
         }
 
         Surface(color = Color(0xFFF0F8F3), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -253,6 +354,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
                 CheckLine(s.workerName.trim().length >= 3, "ФИО указано")
                 CheckLine(s.permitNumber.trim().length >= 3 && s.errors["permit"] == null, "Номер НД корректен")
                 CheckLine(s.errors.keys.none { it in setOf("primary", "secondary", "third", "extension", "stopReason") }, "Данные этапа заполнены")
+                CheckLine(s.stage.id in savedStageIds && !hasUnsavedChanges, "Текущий этап сохранён")
                 CheckLine(true, "При отсутствии сети данные сохранятся локально")
             }
         }
@@ -375,33 +477,85 @@ private fun Field(
 }
 
 @Composable
-private fun StagePicker(selected: Stage, onSelect: (Stage) -> Unit) {
+private fun StagePicker(
+    selected: Stage,
+    savedStageIds: Set<String>,
+    hasUnsavedChanges: Boolean,
+    onSelect: (Stage) -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    val selectedSaved = selected.id in savedStageIds
+    val savedCount = savedStageCount(savedStageIds)
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Этап работ", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         Box {
             OutlinedCard(Modifier.fillMaxWidth().clickable { open = true }, shape = RoundedCornerShape(11.dp)) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Flag, null, tint = Blue)
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        when {
+                            hasUnsavedChanges -> Icons.Default.Edit
+                            selectedSaved -> Icons.Default.CheckCircle
+                            else -> Icons.Default.Flag
+                        },
+                        null,
+                        tint = when {
+                            hasUnsavedChanges -> Orange
+                            selectedSaved -> Green
+                            else -> Blue
+                        },
+                    )
                     Spacer(Modifier.width(9.dp))
-                    Text(selected.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Column(Modifier.weight(1f)) {
+                        Text(selected.title, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            when {
+                                hasUnsavedChanges -> "Есть несохранённые изменения"
+                                selectedSaved -> "Этап сохранён"
+                                else -> "Этап ещё не сохранён"
+                            },
+                            fontSize = 11.sp,
+                            color = when {
+                                hasUnsavedChanges -> Orange
+                                selectedSaved -> Green
+                                else -> Color.Gray
+                            },
+                        )
+                    }
                     Icon(Icons.Default.KeyboardArrowDown, null)
                 }
             }
             DropdownMenu(open, { open = false }) {
                 stages.forEach { stage ->
+                    val saved = stage.id in savedStageIds
                     DropdownMenuItem(
                         text = {
                             Column {
                                 Text(stage.title, fontWeight = FontWeight.SemiBold)
                                 val eventTitles = listOfNotNull(stage.first.title, stage.second?.title, stage.third?.title)
-                                if (eventTitles.size > 1) Text(eventTitles.joinToString(" • "), fontSize = 11.sp, color = Color.Gray)
+                                Text(
+                                    if (saved) "Сохранён" else eventTitles.joinToString(" • "),
+                                    fontSize = 11.sp,
+                                    color = if (saved) Green else Color.Gray,
+                                )
                             }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                if (saved) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                null,
+                                tint = if (saved) Green else Color.Gray,
+                            )
                         },
                         onClick = { onSelect(stage); open = false },
                     )
                 }
             }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.CheckCircle, null, tint = Green, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Сохранено этапов: $savedCount из ${stages.size}", fontSize = 12.sp, color = Color.Gray)
         }
     }
 }
@@ -460,9 +614,9 @@ private fun HelpScreen() {
             "1. Укажите ФИО — приложение запомнит его на этом устройстве.\n\n" +
                 "2. Введите номер НД. Ранее использованные номера появляются в подсказках и могут быть подставлены одним нажатием.\n\n" +
                 "3. Выберите укрупнённый этап. «Передача и начало работ» содержит передачу, фактическое начало и окончание работ.\n\n" +
-                "4. Для дат и времени можно использовать кнопку «Сейчас».\n\n" +
-                "5. Для остановки работ обязательно укажите время и причину. Для продления РПО укажите новую дату окончания.\n\n" +
-                "6. При нажатии «Сохранить и отправить» данные сначала сохраняются на телефоне. Если интернета нет, они останутся в очереди и отправятся автоматически после появления сети.\n\n" +
+                "4. Заполните выбранный этап и обязательно нажмите «Сохранить этап». Сохранённые этапы отмечаются зелёной галочкой. При попытке уйти с изменённого, но не сохранённого этапа приложение покажет предупреждение.\n\n" +
+                "5. Для дат и времени можно использовать кнопку «Сейчас». Для остановки работ обязательно укажите время и причину. Для продления РПО укажите новую дату окончания.\n\n" +
+                "6. После нажатия «Сохранить этап» данные сначала сохраняются на телефоне. Если интернета нет, они останутся в очереди и отправятся автоматически после появления сети.\n\n" +
                 "7. Для синхронизации подходит любая интернет-сеть, включая медленное мобильное соединение 2G. Передаваемые пакеты данных небольшие."
         )
     }
