@@ -33,6 +33,27 @@ class ExportBatch(Base):
     created_by: Mapped[Operator] = relationship()
 
 
+class PermitRecord(Base):
+    """Canonical one-row representation of a work permit.
+
+    Raw MobileEvent rows remain as an immutable technical audit/sync log, while
+    this table is the operator-facing source of truth: one DB row per permit.
+    data_json stores the latest value/comment/timestamp for every RPO field.
+    """
+    __tablename__ = "permit_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    permit_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    device_id: Mapped[str] = mapped_column(String(160), index=True)
+    worker_name: Mapped[str] = mapped_column(String(180), index=True)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    first_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    export_batch_id: Mapped[int | None] = mapped_column(ForeignKey("export_batches.id"), nullable=True)
+    export_batch: Mapped[ExportBatch | None] = relationship()
+
+
 class MobileEvent(Base):
     __tablename__ = "mobile_events"
     __table_args__ = (UniqueConstraint("client_event_id", name="uq_mobile_event_client_id"),)
