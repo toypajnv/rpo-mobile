@@ -14,3 +14,8 @@ local.properties
 
 # Secrets
 .env
+.env.before_*
+.env.*.backup
+
+# Server runtime / backups
+backups/
