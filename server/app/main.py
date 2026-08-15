@@ -25,6 +25,7 @@ from .services.mailer import send_export
 from .stages import STAGES
 
 BASE_DIR = Path(__file__).resolve().parent
+DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
 settings.ensure_dirs()
 
 
@@ -36,7 +37,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.3.1", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", https_only=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -131,6 +132,10 @@ def _stage_keys() -> list[str]:
     return [key for key, _ in sorted(STAGES.items(), key=lambda item: item[1]["order"])]
 
 
+def _dashboard_stage_keys() -> list[str]:
+    return [key for key in DASHBOARD_STAGE_KEYS if key in STAGES]
+
+
 def _field_dt(data: dict, key: str) -> datetime | None:
     raw = str((data.get(key) or {}).get("event_time", "")).strip()
     if not raw:
@@ -180,10 +185,23 @@ def _record_summary(record: PermitRecord) -> tuple[str, str]:
 
 def _work_view(record: PermitRecord) -> dict:
     data = record_data(record)
-    filled = sum(1 for key in _stage_keys() if _has_stage(data, key))
-    total = len(_stage_keys()) or 1
+    visible_keys = _dashboard_stage_keys()
+    filled = sum(1 for key in visible_keys if _has_stage(data, key))
+    total = len(visible_keys) or 1
     summary, comments = _record_summary(record)
     status, status_class = _record_state(record)
+    stage_items = []
+    for key in visible_keys:
+        field = data.get(key) or {}
+        value = str(field.get("field_value", "")).strip()
+        if not value:
+            continue
+        stage_items.append({
+            "key": key,
+            "label": STAGES[key]["label"],
+            "value": value,
+            "comment": str(field.get("comment", "")).strip(),
+        })
     return {
         "id": record.id,
         "updated_at": record.updated_at,
@@ -196,13 +214,15 @@ def _work_view(record: PermitRecord) -> dict:
         "status_class": status_class,
         "progress": round(filled * 100 / total),
         "stage_count": filled,
+        "stage_total": total,
+        "stage_items": stage_items,
     }
 
 
 def _preview_record(record: PermitRecord) -> dict:
     data = record_data(record)
     fields = {}
-    for key in _stage_keys():
+    for key in _dashboard_stage_keys():
         src = data.get(key) or {}
         fields[key] = {
             "label": STAGES[key]["label"],
@@ -215,6 +235,8 @@ def _preview_record(record: PermitRecord) -> dict:
         "permit_number": record.permit_number,
         "worker_name": record.worker_name,
         "updated_at": record.updated_at.isoformat(),
+        "previously_exported": bool(record.exported_at),
+        "exported_at": record.exported_at.isoformat() if record.exported_at else "",
         "fields": fields,
     }
 
@@ -224,7 +246,7 @@ def _analytics_context(records: list[PermitRecord], raw_events: list[MobileEvent
     extended_count = 0
     completion_hours: list[float] = []
     worker_counts: dict[str, int] = {}
-    stage_counts = {key: 0 for key in _stage_keys()}
+    stage_counts = {key: 0 for key in _dashboard_stage_keys()}
 
     for record in records:
         _, state_class = _record_state(record)
@@ -271,6 +293,16 @@ def _analytics_context(records: list[PermitRecord], raw_events: list[MobileEvent
         {"name": name, "count": count}
         for name, count in sorted(worker_counts.items(), key=lambda item: (-item[1], item[0].lower()))[:5]
     ]
+    avg_completion_hours = sum(completion_hours) / len(completion_hours) if completion_hours else None
+    if avg_completion_hours is None:
+        avg_completion_label = "—"
+    elif avg_completion_hours < (1 / 60):
+        avg_completion_label = "< 1 мин"
+    elif avg_completion_hours < 1:
+        avg_completion_label = f"{max(1, round(avg_completion_hours * 60))} мин"
+    else:
+        avg_completion_label = f"{avg_completion_hours:.1f} ч"
+
     return {
         "total": total,
         "active": state_counts.get("active", 0) + state_counts.get("extended", 0),
@@ -278,7 +310,8 @@ def _analytics_context(records: list[PermitRecord], raw_events: list[MobileEvent
         "completed": state_counts.get("done", 0),
         "preparing": state_counts.get("preparing", 0),
         "extended": extended_count,
-        "avg_completion_hours": round(sum(completion_hours) / len(completion_hours), 1) if completion_hours else None,
+        "avg_completion_hours": round(avg_completion_hours, 1) if avg_completion_hours is not None else None,
+        "avg_completion_label": avg_completion_label,
         "activity_days": activity_days,
         "stage_progress": stage_progress,
         "top_workers": top_workers,
@@ -495,6 +528,8 @@ def operator_events(
             "status_class": item["status_class"],
             "progress": item["progress"],
             "stage_count": item["stage_count"],
+            "stage_total": item["stage_total"],
+            "stage_items": item["stage_items"],
         })
     return result
 
@@ -536,12 +571,12 @@ def export_preview(
     start, end = _parse_period(period_from, period_to)
     records = list(db.scalars(
         select(PermitRecord)
-        .where(PermitRecord.updated_at >= start, PermitRecord.updated_at <= end, PermitRecord.exported_at.is_(None))
+        .where(PermitRecord.updated_at >= start, PermitRecord.updated_at <= end)
         .order_by(PermitRecord.updated_at.asc())
     ))
     return {
         "records": [_preview_record(record) for record in records],
-        "stage_keys": _stage_keys(),
+        "stage_keys": _dashboard_stage_keys(),
         "period_from": start.isoformat(),
         "period_to": end.isoformat(),
     }
@@ -562,21 +597,6 @@ def send_export_confirmed(
     if "@" not in recipient:
         raise HTTPException(status_code=400, detail="Укажите корректный email")
 
-    recent = db.scalar(
-        select(ExportBatch)
-        .where(
-            ExportBatch.recipient == recipient,
-            ExportBatch.period_from == start,
-            ExportBatch.period_to == end,
-            ExportBatch.created_at >= utcnow() - timedelta(seconds=60),
-            ExportBatch.status.in_(["sent", "saved_to_outbox", "created"]),
-        )
-        .order_by(ExportBatch.created_at.desc())
-        .limit(1)
-    )
-    if recent:
-        return RedirectResponse("/dashboard?export=duplicate#exports", status_code=303)
-
     try:
         edited = json.loads(edited_json)
         if not isinstance(edited, list):
@@ -586,7 +606,7 @@ def send_export_confirmed(
 
     allowed_records = list(db.scalars(
         select(PermitRecord)
-        .where(PermitRecord.updated_at >= start, PermitRecord.updated_at <= end, PermitRecord.exported_at.is_(None))
+        .where(PermitRecord.updated_at >= start, PermitRecord.updated_at <= end)
         .order_by(PermitRecord.updated_at.asc())
     ))
     by_permit = {record.permit_number: record for record in allowed_records}
@@ -603,7 +623,7 @@ def send_export_confirmed(
         record.worker_name = worker_name[:180]
         current = record_data(record)
         fields = item.get("fields") if isinstance(item.get("fields"), dict) else {}
-        for key in _stage_keys():
+        for key in _dashboard_stage_keys():
             incoming = fields.get(key)
             if not isinstance(incoming, dict):
                 continue
@@ -622,7 +642,7 @@ def send_export_confirmed(
         selected.append(record)
 
     if not selected:
-        raise HTTPException(status_code=400, detail="За выбранный период нет невыгруженных нарядов-допусков")
+        raise HTTPException(status_code=400, detail="За выбранный период нет нарядов-допусков")
 
     batch = ExportBatch(
         period_from=start,
