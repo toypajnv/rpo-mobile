@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
+from unittest.mock import patch
 
 from openpyxl import load_workbook
 from sqlalchemy import func, select
@@ -84,9 +86,9 @@ class PermitRegressionTests(unittest.TestCase):
         self.assertIn("Начало подготовки", result[0]["field_value"])
         self.assertIn("Окончание подготовки", result[0]["field_value"])
 
-    def test_export_is_one_row_per_permit_and_one_email(self) -> None:
+    def _records(self) -> list[PermitRecord]:
         now = datetime.now(timezone.utc)
-        records = [
+        return [
             PermitRecord(
                 id=1,
                 permit_number="34567",
@@ -107,13 +109,14 @@ class PermitRegressionTests(unittest.TestCase):
             ),
         ]
 
+    def test_export_is_one_row_per_permit_and_one_file_email(self) -> None:
         old_mode = settings.mail_mode
         old_outbox = settings.outbox_dir
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 export_dir = Path(tmp) / "exports"
                 outbox_dir = Path(tmp) / "outbox"
-                xlsx_path, json_path = build_export(records, str(export_dir), batch_id=77)
+                xlsx_path, json_path = build_export(self._records(), str(export_dir), batch_id=77)
 
                 ws = load_workbook(xlsx_path, read_only=True).active
                 self.assertEqual(ws.max_row, 3)  # header + 2 permit rows
@@ -137,6 +140,63 @@ class PermitRegressionTests(unittest.TestCase):
         finally:
             settings.mail_mode = old_mode
             settings.outbox_dir = old_outbox
+
+    def test_resend_api_uses_one_https_request_with_two_attachments(self) -> None:
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"email-test-123"}'
+
+        old_mode = settings.mail_mode
+        old_key = settings.resend_api_key
+        old_from = settings.resend_from
+        old_url = settings.resend_api_url
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                xlsx_path, json_path = build_export(self._records(), str(Path(tmp) / "exports"), batch_id=88)
+                settings.mail_mode = "resend"
+                settings.resend_api_key = "re_test_secret"
+                settings.resend_from = "РПО Сервер <rpo@rpo-mng.ru>"
+                settings.resend_api_url = "https://api.resend.com/emails"
+
+                with patch("app.services.mailer.urllib_request.urlopen", return_value=FakeResponse()) as mocked:
+                    result = send_export(
+                        "operator@example.ru",
+                        "РПО — выгрузка №88",
+                        "Одна выгрузка одним письмом",
+                        [xlsx_path, json_path],
+                        idempotency_key="rpo-export-88",
+                    )
+
+                self.assertEqual(result, "resend:email-test-123")
+                self.assertEqual(mocked.call_count, 1)
+                req = mocked.call_args.args[0]
+                self.assertEqual(req.full_url, "https://api.resend.com/emails")
+                headers = {k.lower(): v for k, v in req.header_items()}
+                self.assertEqual(headers["authorization"], "Bearer re_test_secret")
+                self.assertEqual(headers["idempotency-key"], "rpo-export-88")
+                self.assertIn("rpo-server", headers["user-agent"].lower())
+
+                body = json.loads(req.data.decode("utf-8"))
+                self.assertEqual(body["from"], "РПО Сервер <rpo@rpo-mng.ru>")
+                self.assertEqual(body["to"], ["operator@example.ru"])
+                self.assertEqual(len(body["attachments"]), 2)
+                filenames = {item["filename"] for item in body["attachments"]}
+                self.assertEqual(filenames, {xlsx_path.name, json_path.name})
+                for item in body["attachments"]:
+                    decoded = base64.b64decode(item["content"])
+                    original = xlsx_path if item["filename"] == xlsx_path.name else json_path
+                    self.assertEqual(decoded, original.read_bytes())
+        finally:
+            settings.mail_mode = old_mode
+            settings.resend_api_key = old_key
+            settings.resend_from = old_from
+            settings.resend_api_url = old_url
 
 
 class DashboardStaticTests(unittest.TestCase):
