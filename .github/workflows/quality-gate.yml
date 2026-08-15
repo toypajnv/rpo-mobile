@@ -1,0 +1,76 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: server
+      DATABASE_URL: sqlite:////tmp/rpo-quality.db
+      SECRET_KEY: quality-gate-secret
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: QualityGate123!
+      MAIL_MODE: file
+      EXPORT_DIR: /tmp/rpo-quality-exports
+      OUTBOX_DIR: /tmp/rpo-quality-outbox
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r server/requirements.txt
+
+      - name: Compile backend Python
+        run: python -m compileall -q server/app
+
+      - name: Check dashboard JavaScript syntax
+        run: node --check server/app/static/dashboard.js
+
+      - name: Run backend regression tests
+        run: python -m unittest discover -s server/tests -v
+
+  android-tests:
+    name: Android unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Run Android unit tests before APK build
+        working-directory: android
+        run: gradle --no-daemon testDebugUnitTest
