@@ -28,6 +28,9 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
       MAIL_MODE: ${MAIL_MODE:-file}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-РПО Сервер <rpo@rpo-mng.ru>}
+      RESEND_API_URL: ${RESEND_API_URL:-https://api.resend.com/emails}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
