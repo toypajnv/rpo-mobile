@@ -34,10 +34,10 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
-          cache-dependency-path: server/requirements.txt
+          cache-dependency-path: server/requirements-test.txt
 
-      - name: Install backend dependencies
-        run: python -m pip install -r server/requirements.txt
+      - name: Install backend test dependencies
+        run: python -m pip install -r server/requirements-test.txt
 
       - name: Compile backend Python
         run: python -m compileall -q server/app
