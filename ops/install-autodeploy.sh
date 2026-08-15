@@ -9,7 +9,10 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 fi
 
 cd "$PROJECT_DIR"
-chmod 0755 ops/autodeploy.sh
+
+# Do not chmod tracked repository files here. Changing the executable bit makes
+# a clean checkout appear locally modified and intentionally stops autodeploy.
+# The systemd unit invokes the script explicitly through /bin/bash instead.
 install -m 0644 ops/rpo-autodeploy.service /etc/systemd/system/rpo-autodeploy.service
 install -m 0644 ops/rpo-autodeploy.timer /etc/systemd/system/rpo-autodeploy.timer
 systemctl daemon-reload
