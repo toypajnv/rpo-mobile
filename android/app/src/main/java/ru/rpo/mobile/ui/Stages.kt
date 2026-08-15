@@ -48,3 +48,8 @@ val stages = listOf(
         first = StageEvent("BE", "Продление РПО"),
     ),
 )
+
+fun savedStageCount(savedStageIds: Set<String>): Int = stages.count { it.id in savedStageIds }
+
+fun shouldWarnBeforeStageSwitch(current: Stage, target: Stage, hasUnsavedChanges: Boolean): Boolean =
+    current.id != target.id && hasUnsavedChanges
