@@ -31,12 +31,12 @@ document.querySelectorAll('[data-open-tab]').forEach(b=>b.addEventListener('clic
 window.addEventListener('hashchange',()=>activateTab(location.hash.slice(1)||'home',false));
 activateTab(location.hash.slice(1)||'home',false);
 
-function stageDetails(e){
+function stageDetails(e, isOpen=false){
   const items=Array.isArray(e.stage_items)?e.stage_items:[];
   const total=Number(e.stage_total)||items.length||1;
   if(!items.length) return '<span class="muted">Этапы пока не заполнены</span>';
   const lines=items.map(item=>`<div class="stage-detail-line"><span><b>${esc(item.label)}</b><small>${esc(item.key)}</small></span><strong>${esc(item.value)}</strong>${item.comment?`<em>${esc(item.comment)}</em>`:''}</div>`).join('');
-  return `<details class="stage-details"><summary><span>${items.length} из ${total} этапов</span><small>Показать детали</small></summary><div class="stage-detail-list">${lines}</div></details>`;
+  return `<details class="stage-details" data-permit="${esc(e.permit_number)}"${isOpen?' open':''}><summary><span>${items.length} из ${total} этапов</span><small>Показать детали</small></summary><div class="stage-detail-list">${lines}</div></details>`;
 }
 
 async function refreshWorks(){
@@ -45,7 +45,12 @@ async function refreshWorks(){
     const rows=await r.json();
     const body=document.querySelector('#works-body');
     if(!body)return;
-    body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.updated_at))}</td><td><b>${esc(e.permit_number)}</b></td><td><b>${esc(e.worker_name)}</b></td><td><span class="work-state ${esc(e.status_class)}">${esc(e.status)}</span></td><td><div class="progress"><span style="width:${Number(e.progress)||0}%"></span></div><small>${Number(e.stage_count)||0} из ${Number(e.stage_total)||0}</small></td><td class="works-stage-cell">${stageDetails(e)}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td></tr>`).join('');
+    const openPermits=new Set(
+      Array.from(body.querySelectorAll('details.stage-details[open]'))
+        .map(details=>details.dataset.permit)
+        .filter(Boolean)
+    );
+    body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.updated_at))}</td><td><b>${esc(e.permit_number)}</b></td><td><b>${esc(e.worker_name)}</b></td><td><span class="work-state ${esc(e.status_class)}">${esc(e.status)}</span></td><td><div class="progress"><span style="width:${Number(e.progress)||0}%"></span></div><small>${Number(e.stage_count)||0} из ${Number(e.stage_total)||0}</small></td><td class="works-stage-cell">${stageDetails(e,openPermits.has(e.permit_number))}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td></tr>`).join('');
   }catch(e){console.error('refreshWorks',e)}
 }
 
