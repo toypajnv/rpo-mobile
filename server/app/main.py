@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.2.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", https_only=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -107,9 +107,6 @@ def ensure_permit_records() -> None:
         events = list(db.scalars(select(MobileEvent).order_by(MobileEvent.received_at.asc(), MobileEvent.id.asc())))
         for event in events:
             _apply_event_to_record(db, event)
-            # Make the just-created permit visible to the next SELECT in this
-            # same transaction, so subsequent stages update one row instead
-            # of trying to insert duplicate permit_number values.
             db.flush()
         db.commit()
 
@@ -134,6 +131,38 @@ def _stage_keys() -> list[str]:
     return [key for key, _ in sorted(STAGES.items(), key=lambda item: item[1]["order"])]
 
 
+def _field_dt(data: dict, key: str) -> datetime | None:
+    raw = str((data.get(key) or {}).get("event_time", "")).strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _has_stage(data: dict, key: str) -> bool:
+    return bool(str((data.get(key) or {}).get("field_value", "")).strip())
+
+
+def _record_state(record: PermitRecord) -> tuple[str, str]:
+    data = record_data(record)
+    if _has_stage(data, "BC"):
+        return "Завершено", "done"
+    stop_at = _field_dt(data, "AZ")
+    resume_at = _field_dt(data, "BA")
+    if stop_at and (not resume_at or stop_at > resume_at):
+        return "Остановлено", "stopped"
+    if _has_stage(data, "AY"):
+        return ("Продлено", "extended") if _has_stage(data, "BE") else ("В работе", "active")
+    if any(_has_stage(data, key) for key in ("AT", "AU", "AV")):
+        return "Подготовка", "preparing"
+    return "Создано", "new"
+
+
 def _record_summary(record: PermitRecord) -> tuple[str, str]:
     data = record_data(record)
     values = []
@@ -147,6 +176,27 @@ def _record_summary(record: PermitRecord) -> tuple[str, str]:
         if comment:
             comments.append(f"{STAGES[key]['label']}: {comment}")
     return "\n".join(values) or "Данные ещё не заполнены", "\n".join(comments)
+
+
+def _work_view(record: PermitRecord) -> dict:
+    data = record_data(record)
+    filled = sum(1 for key in _stage_keys() if _has_stage(data, key))
+    total = len(_stage_keys()) or 1
+    summary, comments = _record_summary(record)
+    status, status_class = _record_state(record)
+    return {
+        "id": record.id,
+        "updated_at": record.updated_at,
+        "worker_name": record.worker_name,
+        "permit_number": record.permit_number,
+        "summary": summary,
+        "comments": comments,
+        "exported_at": record.exported_at,
+        "status": status,
+        "status_class": status_class,
+        "progress": round(filled * 100 / total),
+        "stage_count": filled,
+    }
 
 
 def _preview_record(record: PermitRecord) -> dict:
@@ -166,6 +216,72 @@ def _preview_record(record: PermitRecord) -> dict:
         "worker_name": record.worker_name,
         "updated_at": record.updated_at.isoformat(),
         "fields": fields,
+    }
+
+
+def _analytics_context(records: list[PermitRecord], raw_events: list[MobileEvent], now: datetime) -> dict:
+    state_counts = {"active": 0, "stopped": 0, "done": 0, "preparing": 0, "extended": 0, "new": 0}
+    extended_count = 0
+    completion_hours: list[float] = []
+    worker_counts: dict[str, int] = {}
+    stage_counts = {key: 0 for key in _stage_keys()}
+
+    for record in records:
+        _, state_class = _record_state(record)
+        state_counts[state_class] = state_counts.get(state_class, 0) + 1
+        data = record_data(record)
+        if _has_stage(data, "BE"):
+            extended_count += 1
+        start_dt = _field_dt(data, "AY")
+        finish_dt = _field_dt(data, "BC")
+        if start_dt and finish_dt and finish_dt >= start_dt:
+            completion_hours.append((finish_dt - start_dt).total_seconds() / 3600)
+        worker_counts[record.worker_name] = worker_counts.get(record.worker_name, 0) + 1
+        for key in stage_counts:
+            if _has_stage(data, key):
+                stage_counts[key] += 1
+
+    start_day = (now - timedelta(days=6)).date()
+    daily = {start_day + timedelta(days=i): 0 for i in range(7)}
+    for event in raw_events:
+        received = event.received_at
+        if received.tzinfo is None:
+            received = received.replace(tzinfo=timezone.utc)
+        day = received.astimezone(timezone.utc).date()
+        if day in daily:
+            daily[day] += 1
+    max_daily = max(daily.values(), default=0) or 1
+    activity_days = [
+        {"label": day.strftime("%d.%m"), "count": count, "pct": round(count * 100 / max_daily)}
+        for day, count in daily.items()
+    ]
+
+    total = len(records)
+    stage_progress = [
+        {
+            "key": key,
+            "label": STAGES[key]["label"],
+            "count": count,
+            "pct": round(count * 100 / total) if total else 0,
+        }
+        for key, count in stage_counts.items()
+        if count
+    ]
+    top_workers = [
+        {"name": name, "count": count}
+        for name, count in sorted(worker_counts.items(), key=lambda item: (-item[1], item[0].lower()))[:5]
+    ]
+    return {
+        "total": total,
+        "active": state_counts.get("active", 0) + state_counts.get("extended", 0),
+        "stopped": state_counts.get("stopped", 0),
+        "completed": state_counts.get("done", 0),
+        "preparing": state_counts.get("preparing", 0),
+        "extended": extended_count,
+        "avg_completion_hours": round(sum(completion_hours) / len(completion_hours), 1) if completion_hours else None,
+        "activity_days": activity_days,
+        "stage_progress": stage_progress,
+        "top_workers": top_workers,
     }
 
 
@@ -306,21 +422,49 @@ def dashboard_context(db: Session):
     active_since = now - timedelta(hours=12)
     active_workers = db.scalar(select(func.count(func.distinct(PermitRecord.worker_name))).where(PermitRecord.updated_at >= active_since)) or 0
     last_export = db.scalar(select(ExportBatch).order_by(ExportBatch.created_at.desc()).limit(1))
-    records = list(db.scalars(select(PermitRecord).order_by(PermitRecord.updated_at.desc()).limit(100)))
-    exports = list(db.scalars(select(ExportBatch).order_by(ExportBatch.created_at.desc()).limit(10)))
-    events = []
-    for record in records:
-        summary, comments = _record_summary(record)
-        events.append({
-            "id": record.id,
-            "updated_at": record.updated_at,
-            "worker_name": record.worker_name,
-            "permit_number": record.permit_number,
-            "summary": summary,
-            "comments": comments,
-            "exported_at": record.exported_at,
-        })
-    return dict(received_today=received_today, pending=pending, active_workers=active_workers, last_export=last_export, events=events, exports=exports)
+
+    all_records = list(db.scalars(select(PermitRecord).order_by(PermitRecord.updated_at.desc())))
+    works = [_work_view(record) for record in all_records[:200]]
+    exports = list(db.scalars(select(ExportBatch).order_by(ExportBatch.created_at.desc()).limit(30)))
+    transmissions_raw = list(db.scalars(select(MobileEvent).order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc()).limit(300)))
+    transmissions = [
+        {
+            "id": event.id,
+            "received_at": event.received_at,
+            "worker_name": event.worker_name,
+            "permit_number": event.permit_number,
+            "field_key": event.field_key,
+            "stage_label": event.stage_label,
+            "field_value": event.field_value,
+            "comment": event.comment,
+            "exported_at": event.exported_at,
+        }
+        for event in transmissions_raw
+    ]
+    analytics_events = list(db.scalars(
+        select(MobileEvent)
+        .where(MobileEvent.received_at >= now - timedelta(days=7))
+        .order_by(MobileEvent.received_at.asc())
+    ))
+    analytics = _analytics_context(all_records, analytics_events, now)
+    settings_view = {
+        "mail_provider": "Resend API" if settings.mail_mode.lower() == "resend" else ("SMTP" if settings.mail_mode.lower() == "smtp" else "Локальный outbox"),
+        "mail_from": settings.resend_from if settings.mail_mode.lower() == "resend" else settings.smtp_from,
+        "mail_ready": bool(settings.resend_api_key) if settings.mail_mode.lower() == "resend" else bool(settings.smtp_host) if settings.mail_mode.lower() == "smtp" else True,
+        "database": "PostgreSQL" if settings.database_url.startswith("postgresql") else "SQLite",
+        "app_version": app.version,
+    }
+    return dict(
+        received_today=received_today,
+        pending=pending,
+        active_workers=active_workers,
+        last_export=last_export,
+        works=works,
+        transmissions=transmissions,
+        exports=exports,
+        analytics=analytics,
+        settings_view=settings_view,
+    )
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -338,17 +482,48 @@ def operator_events(
     records = list(db.scalars(select(PermitRecord).order_by(PermitRecord.updated_at.desc()).limit(limit)))
     result = []
     for record in records:
-        summary, comments = _record_summary(record)
+        item = _work_view(record)
         result.append({
-            "id": record.id,
-            "updated_at": record.updated_at.isoformat(),
-            "worker_name": record.worker_name,
-            "permit_number": record.permit_number,
-            "summary": summary,
-            "comments": comments,
-            "exported": bool(record.exported_at),
+            "id": item["id"],
+            "updated_at": item["updated_at"].isoformat(),
+            "worker_name": item["worker_name"],
+            "permit_number": item["permit_number"],
+            "summary": item["summary"],
+            "comments": item["comments"],
+            "exported": bool(item["exported_at"]),
+            "status": item["status"],
+            "status_class": item["status_class"],
+            "progress": item["progress"],
+            "stage_count": item["stage_count"],
         })
     return result
+
+
+@app.get("/api/operator/transmissions")
+def operator_transmissions(
+    operator: Operator = Depends(current_operator),
+    db: Session = Depends(get_db),
+    limit: int = Query(200, ge=1, le=500),
+):
+    events = list(db.scalars(
+        select(MobileEvent)
+        .order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc())
+        .limit(limit)
+    ))
+    return [
+        {
+            "id": event.id,
+            "received_at": event.received_at.isoformat(),
+            "worker_name": event.worker_name,
+            "permit_number": event.permit_number,
+            "field_key": event.field_key,
+            "stage_label": event.stage_label,
+            "field_value": event.field_value,
+            "comment": event.comment or "",
+            "exported": bool(event.exported_at),
+        }
+        for event in events
+    ]
 
 
 @app.get("/api/operator/export-preview")
@@ -400,7 +575,7 @@ def send_export_confirmed(
         .limit(1)
     )
     if recent:
-        return RedirectResponse("/dashboard?export=duplicate", status_code=303)
+        return RedirectResponse("/dashboard?export=duplicate#exports", status_code=303)
 
     try:
         edited = json.loads(edited_json)
@@ -500,4 +675,4 @@ def send_export_confirmed(
         event.export_batch_id = batch.id
 
     db.commit()
-    return RedirectResponse("/dashboard?export=ok", status_code=303)
+    return RedirectResponse("/dashboard?export=ok#exports", status_code=303)
