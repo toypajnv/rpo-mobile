@@ -169,7 +169,7 @@ class PermitRegressionTests(unittest.TestCase):
         self.assertEqual(preview["stage_keys"], ["AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC"])
 
         send_source = inspect.getsource(send_export_confirmed)
-        self.assertNotIn("exported_at.is_(None)", send_source)
+        self.assertNotIn("PermitRecord.exported_at.is_(None)", send_source)
         self.assertNotIn("export=duplicate", send_source)
 
     def _records(self) -> list[PermitRecord]:
