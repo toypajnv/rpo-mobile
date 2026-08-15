@@ -23,6 +23,7 @@ private val Blue = Color(0xFF0D63E6)
 private val Bg = Color(0xFFF4F7FB)
 private val Green = Color(0xFF1B9E50)
 private val Red = Color(0xFFD73535)
+private val Orange = Color(0xFFE98B00)
 
 enum class Tab { FORM, HISTORY, HELP }
 
@@ -30,6 +31,7 @@ enum class Tab { FORM, HISTORY, HELP }
 fun RpoApp(vm: RpoViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     val history by vm.history.collectAsState()
+    val permitMemories by vm.permitMemories.collectAsState()
     var tab by remember { mutableStateOf(Tab.FORM) }
 
     LaunchedEffect(tab) { if (tab == Tab.HISTORY) vm.loadHistory() }
@@ -48,7 +50,7 @@ fun RpoApp(vm: RpoViewModel = viewModel()) {
             Column(Modifier.padding(pad).fillMaxSize()) {
                 Header()
                 when (tab) {
-                    Tab.FORM -> FormScreen(state, vm)
+                    Tab.FORM -> FormScreen(state, permitMemories, vm)
                     Tab.HISTORY -> HistoryScreen(history)
                     Tab.HELP -> HelpScreen()
                 }
@@ -61,11 +63,11 @@ fun RpoApp(vm: RpoViewModel = viewModel()) {
 private fun Header() {
     Box(Modifier.fillMaxWidth().background(Navy).padding(horizontal = 16.dp, vertical = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Security, null, tint = Color.White, modifier = Modifier.size(34.dp))
+            Icon(Icons.Default.HealthAndSafety, null, tint = Color.White, modifier = Modifier.size(34.dp))
             Spacer(Modifier.width(10.dp))
             Column {
                 Text("РПО", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                Text("Передача этапов работ", color = Color.White.copy(alpha = .82f), fontSize = 12.sp)
+                Text("Работы повышенной опасности", color = Color.White.copy(alpha = .82f), fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
             Surface(color = Color(0xFF14734C), shape = RoundedCornerShape(50)) {
@@ -82,7 +84,7 @@ private fun Header() {
 }
 
 @Composable
-private fun FormScreen(s: FormState, vm: RpoViewModel) {
+private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: RpoViewModel) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp),
@@ -96,7 +98,7 @@ private fun FormScreen(s: FormState, vm: RpoViewModel) {
                     Icon(
                         if (s.success) Icons.Default.CheckCircle else Icons.Default.Warning,
                         null,
-                        tint = if (s.success) Green else Color(0xFFE98B00),
+                        tint = if (s.success) Green else Orange,
                     )
                     Spacer(Modifier.width(9.dp))
                     Text(s.message, fontWeight = FontWeight.SemiBold)
@@ -104,14 +106,31 @@ private fun FormScreen(s: FormState, vm: RpoViewModel) {
             }
         }
 
+        if (s.pendingCount > 0 || s.failedCount > 0) {
+            Surface(
+                color = if (s.failedCount > 0) Color(0xFFFFF1ED) else Color(0xFFFFF7E8),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (s.failedCount > 0) Icons.Default.ErrorOutline else Icons.Default.CloudSync,
+                        null,
+                        tint = if (s.failedCount > 0) Red else Orange,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        if (s.pendingCount > 0) Text("В очереди на отправку: ${s.pendingCount}", fontWeight = FontWeight.SemiBold)
+                        if (s.failedCount > 0) Text("Требуют повторной проверки: ${s.failedCount}", color = Red, fontSize = 12.sp)
+                        Text("Очередь хранится на телефоне и синхронизируется автоматически.", fontSize = 11.sp, color = Color.Gray)
+                    }
+                    TextButton(onClick = vm::retryPending, enabled = !s.sending) { Text("Повторить") }
+                }
+            }
+        }
+
         Field("ФИО работника", s.workerName, vm::updateWorker, "Например: Иванов И.И.", s.errors["worker"])
-        Field(
-            "Номер наряда-допуска",
-            s.permitNumber,
-            vm::updatePermit,
-            "Например: СН-038364",
-            s.errors["permit"],
-        )
+        PermitField(s.permitNumber, permitMemories, vm::updatePermit, vm::selectPermit, s.errors["permit"])
         StagePicker(s.stage, vm::updateStage)
 
         when (s.stage.kind) {
@@ -133,6 +152,37 @@ private fun FormScreen(s: FormState, vm: RpoViewModel) {
                     onTime = vm::updateSecondaryTime,
                     onNow = vm::nowSecondary,
                     error = s.errors["secondary"],
+                )
+                Field("Комментарий (необязательно)", s.comment, vm::updateComment, "Комментарий к этапу", null, singleLine = false)
+            }
+
+            StageKind.TRIPLE_DATETIME -> {
+                DateTimeBlock(
+                    title = s.stage.first.title,
+                    date = s.primaryDate,
+                    time = s.primaryTime,
+                    onDate = vm::updatePrimaryDate,
+                    onTime = vm::updatePrimaryTime,
+                    onNow = vm::nowPrimary,
+                    error = s.errors["primary"],
+                )
+                DateTimeBlock(
+                    title = requireNotNull(s.stage.second).title,
+                    date = s.secondaryDate,
+                    time = s.secondaryTime,
+                    onDate = vm::updateSecondaryDate,
+                    onTime = vm::updateSecondaryTime,
+                    onNow = vm::nowSecondary,
+                    error = s.errors["secondary"],
+                )
+                DateTimeBlock(
+                    title = requireNotNull(s.stage.third).title,
+                    date = s.thirdDate,
+                    time = s.thirdTime,
+                    onDate = vm::updateThirdDate,
+                    onTime = vm::updateThirdTime,
+                    onNow = vm::nowThird,
+                    error = s.errors["third"],
                 )
                 Field("Комментарий (необязательно)", s.comment, vm::updateComment, "Комментарий к этапу", null, singleLine = false)
             }
@@ -195,17 +245,82 @@ private fun FormScreen(s: FormState, vm: RpoViewModel) {
             if (s.sending) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
             else Icon(Icons.Default.Send, null)
             Spacer(Modifier.width(8.dp))
-            Text(if (s.sending) "Отправка..." else "Отправить на сервер", fontWeight = FontWeight.Bold)
+            Text(if (s.sending) "Синхронизация..." else "Сохранить и отправить", fontWeight = FontWeight.Bold)
         }
 
         Surface(color = Color(0xFFF0F8F3), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 CheckLine(s.workerName.trim().length >= 3, "ФИО указано")
                 CheckLine(s.permitNumber.trim().length >= 3 && s.errors["permit"] == null, "Номер НД корректен")
-                CheckLine(s.errors.keys.none { it in setOf("primary", "secondary", "extension", "stopReason") }, "Данные этапа заполнены")
+                CheckLine(s.errors.keys.none { it in setOf("primary", "secondary", "third", "extension", "stopReason") }, "Данные этапа заполнены")
+                CheckLine(true, "При отсутствии сети данные сохранятся локально")
             }
         }
         Spacer(Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun PermitField(
+    value: String,
+    memories: List<PermitMemory>,
+    onValue: (String) -> Unit,
+    onSelect: (PermitMemory) -> Unit,
+    error: String?,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val suggestions = remember(value, memories) {
+        val query = value.trim()
+        if (query.isBlank()) memories.take(6)
+        else memories.filter { it.permitNumber.contains(query, ignoreCase = true) }.take(6)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text("Номер наряда-допуска", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Box {
+            OutlinedTextField(
+                value = value,
+                onValueChange = {
+                    onValue(it)
+                    expanded = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Например: СН-038364") },
+                singleLine = true,
+                isError = error != null,
+                shape = RoundedCornerShape(11.dp),
+                trailingIcon = {
+                    if (memories.isNotEmpty()) {
+                        IconButton(onClick = { expanded = true }) {
+                            Icon(Icons.Default.History, "Ранее введённые номера")
+                        }
+                    }
+                },
+            )
+            DropdownMenu(
+                expanded = expanded && suggestions.isNotEmpty(),
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.fillMaxWidth(.92f),
+            ) {
+                suggestions.forEach { memory ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(memory.permitNumber, fontWeight = FontWeight.SemiBold)
+                                if (memory.workerName.isNotBlank()) Text(memory.workerName, fontSize = 11.sp, color = Color.Gray)
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Default.History, null) },
+                        onClick = {
+                            onSelect(memory)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+        if (error != null) Text(error, color = Red, fontSize = 12.sp)
+        else if (memories.isNotEmpty()) Text("Введите часть номера или нажмите значок истории для автозаполнения.", color = Color.Gray, fontSize = 11.sp)
     }
 }
 
@@ -279,9 +394,8 @@ private fun StagePicker(selected: Stage, onSelect: (Stage) -> Unit) {
                         text = {
                             Column {
                                 Text(stage.title, fontWeight = FontWeight.SemiBold)
-                                if (stage.kind == StageKind.RANGE_DATETIME && stage.second != null) {
-                                    Text("${stage.first.title} + ${stage.second.title}", fontSize = 11.sp, color = Color.Gray)
-                                }
+                                val eventTitles = listOfNotNull(stage.first.title, stage.second?.title, stage.third?.title)
+                                if (eventTitles.size > 1) Text(eventTitles.joinToString(" • "), fontSize = 11.sp, color = Color.Gray)
                             }
                         },
                         onClick = { onSelect(stage); open = false },
@@ -313,7 +427,7 @@ private fun HistoryScreen(items: List<ru.rpo.mobile.data.EventResponse>) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("История этого устройства", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Последние передачи на сервер", color = Color.Gray)
+        Text("Последние записи, подтверждённые сервером", color = Color.Gray)
         if (items.isEmpty()) Text("Переданных записей пока нет.", Modifier.padding(top = 24.dp), color = Color.Gray)
         items.forEach { e ->
             ElevatedCard(Modifier.fillMaxWidth()) {
@@ -328,7 +442,7 @@ private fun HistoryScreen(items: List<ru.rpo.mobile.data.EventResponse>) {
                     if (e.comment.isNotBlank()) Text(e.comment, color = Color.Gray, fontSize = 12.sp)
                     Text(
                         if (e.exported_at == null) "На сервере · не выгружено" else "Выгружено оператором",
-                        color = if (e.exported_at == null) Color(0xFFE58A00) else Green,
+                        color = if (e.exported_at == null) Orange else Green,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(top = 7.dp),
                     )
@@ -344,12 +458,12 @@ private fun HelpScreen() {
         Text("Справка", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text(
             "1. Укажите ФИО — приложение запомнит его на этом устройстве.\n\n" +
-                "2. Введите номер НД вручную. Недопустимые символы, например %, будут подсвечены.\n\n" +
-                "3. Выберите один из укрупнённых этапов. Для подготовки и начала работ приложение само передаст два связанных события.\n\n" +
+                "2. Введите номер НД. Ранее использованные номера появляются в подсказках и могут быть подставлены одним нажатием.\n\n" +
+                "3. Выберите укрупнённый этап. «Передача и начало работ» содержит передачу, фактическое начало и окончание работ.\n\n" +
                 "4. Для дат и времени можно использовать кнопку «Сейчас».\n\n" +
-                "5. Для остановки работ обязательно укажите время и причину.\n\n" +
-                "6. Для продления РПО укажите новую дату окончания работ.\n\n" +
-                "7. Нажмите «Отправить на сервер». Сервер повторно проверит данные и последовательность дат."
+                "5. Для остановки работ обязательно укажите время и причину. Для продления РПО укажите новую дату окончания.\n\n" +
+                "6. При нажатии «Сохранить и отправить» данные сначала сохраняются на телефоне. Если интернета нет, они останутся в очереди и отправятся автоматически после появления сети.\n\n" +
+                "7. Для синхронизации подходит любая интернет-сеть, включая медленное мобильное соединение 2G. Передаваемые пакеты данных небольшие."
         )
     }
 }

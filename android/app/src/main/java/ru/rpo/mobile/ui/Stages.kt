@@ -1,6 +1,6 @@
 package ru.rpo.mobile.ui
 
-enum class StageKind { RANGE_DATETIME, DATETIME, STOP, EXTENSION_DATE }
+enum class StageKind { RANGE_DATETIME, TRIPLE_DATETIME, DATETIME, STOP, EXTENSION_DATE }
 
 data class StageEvent(val key: String, val title: String)
 
@@ -10,6 +10,7 @@ data class Stage(
     val kind: StageKind,
     val first: StageEvent,
     val second: StageEvent? = null,
+    val third: StageEvent? = null,
 )
 
 val stages = listOf(
@@ -23,9 +24,10 @@ val stages = listOf(
     Stage(
         id = "START_WORK",
         title = "Передача и начало работ",
-        kind = StageKind.RANGE_DATETIME,
+        kind = StageKind.TRIPLE_DATETIME,
         first = StageEvent("AV", "Передача ОП к ОБПР"),
         second = StageEvent("AY", "Фактическое начало работ"),
+        third = StageEvent("BC", "Окончание работ"),
     ),
     Stage(
         id = "STOP_WORK",
@@ -38,12 +40,6 @@ val stages = listOf(
         title = "Возобновление работ",
         kind = StageKind.DATETIME,
         first = StageEvent("BA", "Возобновление работ"),
-    ),
-    Stage(
-        id = "FINISH_WORK",
-        title = "Завершение РПО",
-        kind = StageKind.DATETIME,
-        first = StageEvent("BC", "Фактическое завершение РПО"),
     ),
     Stage(
         id = "EXTEND_WORK",

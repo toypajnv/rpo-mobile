@@ -1,19 +1,23 @@
 package ru.rpo.mobile.ui
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.Network
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import ru.rpo.mobile.BuildConfig
-import ru.rpo.mobile.data.ApiError
-import ru.rpo.mobile.data.ApiFactory
 import ru.rpo.mobile.data.EventRequest
 import ru.rpo.mobile.data.EventResponse
+import ru.rpo.mobile.data.NetworkState
+import ru.rpo.mobile.data.PendingEventStore
+import ru.rpo.mobile.data.PendingSyncScheduler
+import ru.rpo.mobile.data.QueueSyncEngine
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -27,6 +31,12 @@ private val valueFmt = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
 private val permitRegex = Regex("^[0-9A-ZА-ЯЁ._/\\- ]{3,80}$")
 private val permitCharRegex = Regex("[0-9A-ZА-ЯЁ._/\\- ]")
 
+data class PermitMemory(
+    val permitNumber: String,
+    val workerName: String,
+    val lastUsedAt: Long,
+)
+
 data class FormState(
     val workerName: String = "",
     val permitNumber: String = "",
@@ -35,6 +45,8 @@ data class FormState(
     val primaryTime: String = LocalTime.now().format(timeFmt),
     val secondaryDate: String = LocalDate.now().format(dateFmt),
     val secondaryTime: String = LocalTime.now().format(timeFmt),
+    val thirdDate: String = LocalDate.now().format(dateFmt),
+    val thirdTime: String = LocalTime.now().format(timeFmt),
     val extensionDate: String = LocalDate.now().plusDays(1).format(dateFmt),
     val stopReason: String = "",
     val comment: String = "",
@@ -42,6 +54,8 @@ data class FormState(
     val sending: Boolean = false,
     val message: String? = null,
     val success: Boolean = false,
+    val pendingCount: Int = 0,
+    val failedCount: Int = 0,
 )
 
 private data class PendingEvent(
@@ -57,15 +71,80 @@ private data class ValidationResult(
 )
 
 class RpoViewModel(app: Application) : AndroidViewModel(app) {
+    private val application = app
     private val prefs = app.getSharedPreferences("rpo", 0)
-    private val _state = MutableStateFlow(FormState(workerName = prefs.getString("worker_name", "") ?: ""))
+    private val gson = Gson()
+    private val queueStore = PendingEventStore(app)
+    private val connectivityManager = app.getSystemService(ConnectivityManager::class.java)
+
+    private val _state = MutableStateFlow(
+        FormState(
+            workerName = prefs.getString("worker_name", "") ?: "",
+            pendingCount = queueStore.pendingCount(),
+            failedCount = queueStore.failedCount(),
+        )
+    )
     val state: StateFlow<FormState> = _state.asStateFlow()
 
     private val _history = MutableStateFlow<List<EventResponse>>(emptyList())
     val history: StateFlow<List<EventResponse>> = _history.asStateFlow()
 
+    private val _permitMemories = MutableStateFlow(loadPermitMemories())
+    val permitMemories: StateFlow<List<PermitMemory>> = _permitMemories.asStateFlow()
+
     val deviceId: String = Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID)
         ?: "android-${UUID.randomUUID()}"
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            viewModelScope.launch { syncPending(showMessage = false) }
+        }
+    }
+
+    init {
+        PendingSyncScheduler.schedule(app)
+        runCatching { connectivityManager.registerDefaultNetworkCallback(networkCallback) }
+        if (NetworkState.isConnected(app) && queueStore.pendingCount() > 0) {
+            viewModelScope.launch { syncPending(showMessage = false) }
+        }
+    }
+
+    override fun onCleared() {
+        runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+        super.onCleared()
+    }
+
+    private fun loadPermitMemories(): List<PermitMemory> {
+        val raw = prefs.getString("permit_memories", "[]") ?: "[]"
+        val type = object : TypeToken<List<PermitMemory>>() {}.type
+        return try {
+            (gson.fromJson<List<PermitMemory>>(raw, type) ?: emptyList()).sortedByDescending { it.lastUsedAt }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun rememberPermit(permitNumber: String, workerName: String) {
+        val normalized = permitNumber.trim().uppercase()
+        val updated = _permitMemories.value
+            .filterNot { it.permitNumber.equals(normalized, ignoreCase = true) }
+            .toMutableList()
+        updated.add(0, PermitMemory(normalized, workerName.trim(), System.currentTimeMillis()))
+        val limited = updated.take(30)
+        prefs.edit().putString("permit_memories", gson.toJson(limited)).apply()
+        _permitMemories.value = limited
+    }
+
+    fun selectPermit(memory: PermitMemory) {
+        val worker = memory.workerName.ifBlank { _state.value.workerName }
+        _state.value = _state.value.copy(
+            permitNumber = memory.permitNumber,
+            workerName = worker,
+            errors = _state.value.errors - "permit" - "worker",
+            message = null,
+        )
+        if (worker.isNotBlank()) prefs.edit().putString("worker_name", worker).apply()
+    }
 
     fun updateWorker(v: String) {
         _state.value = _state.value.copy(workerName = v.take(180), message = null)
@@ -89,6 +168,8 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             primaryTime = now.toLocalTime().format(timeFmt),
             secondaryDate = now.toLocalDate().format(dateFmt),
             secondaryTime = now.toLocalTime().format(timeFmt),
+            thirdDate = now.toLocalDate().format(dateFmt),
+            thirdTime = now.toLocalTime().format(timeFmt),
             extensionDate = now.toLocalDate().plusDays(1).format(dateFmt),
             stopReason = "",
             comment = "",
@@ -101,33 +182,29 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     fun updatePrimaryTime(v: String) { _state.value = _state.value.copy(primaryTime = v.take(5), message = null) }
     fun updateSecondaryDate(v: String) { _state.value = _state.value.copy(secondaryDate = v.take(10), message = null) }
     fun updateSecondaryTime(v: String) { _state.value = _state.value.copy(secondaryTime = v.take(5), message = null) }
+    fun updateThirdDate(v: String) { _state.value = _state.value.copy(thirdDate = v.take(10), message = null) }
+    fun updateThirdTime(v: String) { _state.value = _state.value.copy(thirdTime = v.take(5), message = null) }
     fun updateExtensionDate(v: String) { _state.value = _state.value.copy(extensionDate = v.take(10), message = null) }
     fun updateStopReason(v: String) { _state.value = _state.value.copy(stopReason = v.take(500), message = null) }
     fun updateComment(v: String) { _state.value = _state.value.copy(comment = v.take(500), message = null) }
 
     fun nowPrimary() {
         val n = LocalDateTime.now()
-        _state.value = _state.value.copy(
-            primaryDate = n.toLocalDate().format(dateFmt),
-            primaryTime = n.toLocalTime().format(timeFmt),
-            message = null,
-        )
+        _state.value = _state.value.copy(primaryDate = n.toLocalDate().format(dateFmt), primaryTime = n.toLocalTime().format(timeFmt), message = null)
     }
 
     fun nowSecondary() {
         val n = LocalDateTime.now()
-        _state.value = _state.value.copy(
-            secondaryDate = n.toLocalDate().format(dateFmt),
-            secondaryTime = n.toLocalTime().format(timeFmt),
-            message = null,
-        )
+        _state.value = _state.value.copy(secondaryDate = n.toLocalDate().format(dateFmt), secondaryTime = n.toLocalTime().format(timeFmt), message = null)
+    }
+
+    fun nowThird() {
+        val n = LocalDateTime.now()
+        _state.value = _state.value.copy(thirdDate = n.toLocalDate().format(dateFmt), thirdTime = n.toLocalTime().format(timeFmt), message = null)
     }
 
     fun extensionTomorrow() {
-        _state.value = _state.value.copy(
-            extensionDate = LocalDate.now().plusDays(1).format(dateFmt),
-            message = null,
-        )
+        _state.value = _state.value.copy(extensionDate = LocalDate.now().plusDays(1).format(dateFmt), message = null)
     }
 
     private fun parseDateTime(date: String, time: String, errorKey: String, errors: MutableMap<String, String>): LocalDateTime? {
@@ -150,32 +227,36 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         if (s.workerName.trim().length < 3) errors["worker"] = "Укажите ФИО работника"
         val permit = s.permitNumber.trim().uppercase()
         if (!permitRegex.matches(permit)) {
-            errors["permit"] = if (permit.length < 3) {
-                "Введите номер наряда-допуска"
-            } else {
-                "Номер НД содержит недопустимые символы"
-            }
+            errors["permit"] = if (permit.length < 3) "Введите номер наряда-допуска" else "Номер НД содержит недопустимые символы"
         }
 
         when (s.stage.kind) {
             StageKind.RANGE_DATETIME -> {
                 val start = parseDateTime(s.primaryDate, s.primaryTime, "primary", errors)
                 val end = parseDateTime(s.secondaryDate, s.secondaryTime, "secondary", errors)
-                if (start != null && end != null && end.isBefore(start)) {
-                    errors["secondary"] = "Окончание не может быть раньше начала"
-                }
+                if (start != null && end != null && end.isBefore(start)) errors["secondary"] = "Окончание не может быть раньше начала"
                 if (start != null && end != null && !end.isBefore(start) && errors["primary"] == null && errors["secondary"] == null) {
                     events += PendingEvent(s.stage.first, start, start.format(valueFmt), s.comment.trim())
-                    val second = requireNotNull(s.stage.second)
-                    events += PendingEvent(second, end, end.format(valueFmt), s.comment.trim())
+                    events += PendingEvent(requireNotNull(s.stage.second), end, end.format(valueFmt), s.comment.trim())
+                }
+            }
+
+            StageKind.TRIPLE_DATETIME -> {
+                val transfer = parseDateTime(s.primaryDate, s.primaryTime, "primary", errors)
+                val start = parseDateTime(s.secondaryDate, s.secondaryTime, "secondary", errors)
+                val end = parseDateTime(s.thirdDate, s.thirdTime, "third", errors)
+                if (transfer != null && start != null && start.isBefore(transfer)) errors["secondary"] = "Начало работ не может быть раньше передачи"
+                if (start != null && end != null && end.isBefore(start)) errors["third"] = "Окончание работ не может быть раньше начала"
+                if (transfer != null && start != null && end != null && errors.keys.none { it in setOf("primary", "secondary", "third") }) {
+                    events += PendingEvent(s.stage.first, transfer, transfer.format(valueFmt), s.comment.trim())
+                    events += PendingEvent(requireNotNull(s.stage.second), start, start.format(valueFmt), s.comment.trim())
+                    events += PendingEvent(requireNotNull(s.stage.third), end, end.format(valueFmt), s.comment.trim())
                 }
             }
 
             StageKind.DATETIME -> {
                 val dt = parseDateTime(s.primaryDate, s.primaryTime, "primary", errors)
-                if (dt != null && errors["primary"] == null) {
-                    events += PendingEvent(s.stage.first, dt, dt.format(valueFmt), s.comment.trim())
-                }
+                if (dt != null && errors["primary"] == null) events += PendingEvent(s.stage.first, dt, dt.format(valueFmt), s.comment.trim())
             }
 
             StageKind.STOP -> {
@@ -193,21 +274,53 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                     errors["extension"] = "Проверьте дату продления"
                     null
                 }
-                if (extension != null && extension.isBefore(LocalDate.now())) {
-                    errors["extension"] = "Дата продления не может быть в прошлом"
-                }
+                if (extension != null && extension.isBefore(LocalDate.now())) errors["extension"] = "Дата продления не может быть в прошлом"
                 if (extension != null && errors["extension"] == null) {
-                    events += PendingEvent(
-                        stage = s.stage.first,
-                        eventTime = LocalDateTime.now(),
-                        fieldValue = extension.format(dateFmt),
-                        comment = s.comment.trim(),
-                    )
+                    events += PendingEvent(s.stage.first, LocalDateTime.now(), extension.format(dateFmt), s.comment.trim())
                 }
             }
         }
-
         return ValidationResult(errors, events)
+    }
+
+    private fun refreshQueueCounts() {
+        _state.value = _state.value.copy(
+            pendingCount = queueStore.pendingCount(),
+            failedCount = queueStore.failedCount(),
+        )
+    }
+
+    private suspend fun syncPending(showMessage: Boolean) {
+        if (!NetworkState.isConnected(application)) {
+            refreshQueueCounts()
+            if (showMessage) _state.value = _state.value.copy(message = "Нет сети. Данные сохранены на устройстве и будут отправлены автоматически.", success = true, sending = false)
+            return
+        }
+
+        val result = QueueSyncEngine.sync(application)
+        refreshQueueCounts()
+        if (result.pending > 0) PendingSyncScheduler.schedule(application)
+        if (result.sent > 0) loadHistory()
+
+        if (showMessage || result.sent > 0 || result.failed > 0) {
+            val message = when {
+                result.failed > 0 -> "Часть данных сохранена локально, но ${result.failed} записей сервер отклонил. Их можно повторить после проверки."
+                result.pending > 0 -> "Данные сохранены. ${result.pending} записей остаются в очереди и будут отправлены автоматически."
+                result.sent > 0 -> "Данные переданы на сервер. Отправлено записей: ${result.sent}."
+                else -> "Очередь синхронизирована."
+            }
+            _state.value = _state.value.copy(message = message, success = result.failed == 0, sending = false)
+        }
+    }
+
+    fun retryPending() {
+        queueStore.retryFailed()
+        refreshQueueCounts()
+        PendingSyncScheduler.schedule(application)
+        viewModelScope.launch {
+            _state.value = _state.value.copy(sending = true, message = "Повторная отправка...", success = true)
+            syncPending(showMessage = true)
+        }
     }
 
     fun send() {
@@ -218,58 +331,41 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        _state.value = s.copy(errors = emptyMap(), sending = true, message = null)
-        viewModelScope.launch {
-            try {
-                for (event in validation.events) {
-                    val req = EventRequest(
-                        client_event_id = UUID.randomUUID().toString(),
-                        device_id = deviceId,
-                        worker_name = s.workerName.trim(),
-                        permit_number = s.permitNumber.trim().uppercase(),
-                        field_key = event.stage.key,
-                        stage_label = event.stage.title,
-                        event_time = event.eventTime.atZone(ZoneId.systemDefault()).toOffsetDateTime().toString(),
-                        field_value = event.fieldValue,
-                        comment = event.comment,
-                    )
-                    val response = ApiFactory.api.sendEvent(req)
-                    if (!response.isSuccessful) {
-                        val detail = try {
-                            Gson().fromJson(response.errorBody()?.string(), ApiError::class.java).detail
-                        } catch (_: Exception) {
-                            null
-                        }
-                        _state.value = _state.value.copy(
-                            sending = false,
-                            message = detail ?: "Сервер отклонил данные",
-                            success = false,
-                        )
-                        return@launch
-                    }
-                }
+        val requests = validation.events.map { event ->
+            EventRequest(
+                client_event_id = UUID.randomUUID().toString(),
+                device_id = deviceId,
+                worker_name = s.workerName.trim(),
+                permit_number = s.permitNumber.trim().uppercase(),
+                field_key = event.stage.key,
+                stage_label = event.stage.title,
+                event_time = event.eventTime.atZone(ZoneId.systemDefault()).toOffsetDateTime().toString(),
+                field_value = event.fieldValue,
+                comment = event.comment,
+            )
+        }
 
-                _state.value = _state.value.copy(
-                    sending = false,
-                    message = if (validation.events.size > 1) "Этап передан на сервер (${validation.events.size} события)" else "Данные переданы на сервер",
-                    success = true,
-                )
-                loadHistory()
-            } catch (_: Exception) {
-                val message = if (BuildConfig.SERVER_URL.contains("10.0.2.2")) {
-                    "Сервер не настроен для телефона: эта сборка использует локальный адрес 10.0.2.2. Нужен адрес VPS."
-                } else {
-                    "Нет связи с сервером. Проверьте интернет и повторите отправку."
-                }
-                _state.value = _state.value.copy(sending = false, message = message, success = false)
-            }
+        queueStore.enqueueAll(requests)
+        rememberPermit(s.permitNumber, s.workerName)
+        refreshQueueCounts()
+        PendingSyncScheduler.schedule(application)
+
+        _state.value = _state.value.copy(
+            errors = emptyMap(),
+            message = if (NetworkState.isConnected(application)) "Данные сохранены на устройстве. Выполняется отправка..." else "Нет интернета. Данные сохранены на устройстве и отправятся автоматически при появлении сети.",
+            success = true,
+            sending = NetworkState.isConnected(application),
+        )
+
+        if (NetworkState.isConnected(application)) {
+            viewModelScope.launch { syncPending(showMessage = true) }
         }
     }
 
     fun loadHistory() {
         viewModelScope.launch {
             try {
-                val response = ApiFactory.api.history(deviceId)
+                val response = ru.rpo.mobile.data.ApiFactory.api.history(deviceId)
                 if (response.isSuccessful) _history.value = response.body().orEmpty()
             } catch (_: Exception) {
             }

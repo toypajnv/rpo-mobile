@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      RPO_SERVER_URL: ${{ secrets.RPO_SERVER_URL }}
+      RPO_SERVER_URL: https://rpo-mng.ru/
 
     steps:
       - name: Checkout
