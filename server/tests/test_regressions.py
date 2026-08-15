@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.main import ensure_permit_records, mobile_history
+from app.main import ensure_permit_records, mobile_history, _record_state, _analytics_context
 from app.models import MobileEvent, PermitRecord
 from app.services.exporter import build_export
 from app.services.mailer import send_export
@@ -30,22 +30,38 @@ class PermitRegressionTests(unittest.TestCase):
         Base.metadata.drop_all(engine)
 
     def _event(self, key: str, value: str, client_id: str) -> MobileEvent:
+        labels = {
+            "AT": "Начало подготовки",
+            "AU": "Окончание подготовки",
+            "AV": "Передача ОП к ОБПР",
+            "AY": "Фактическое начало работ",
+            "AZ": "Остановка работ",
+            "BA": "Возобновление работ",
+            "BC": "Окончание работ",
+            "BE": "Продление РПО",
+        }
         return MobileEvent(
             client_event_id=client_id,
             device_id="device-test-1",
             worker_name="Иванов И.И.",
             permit_number="34567",
             field_key=key,
-            stage_label={
-                "AT": "Начало подготовки",
-                "AU": "Окончание подготовки",
-                "AV": "Передача ОП к ОБПР",
-                "AY": "Фактическое начало работ",
-                "BC": "Окончание работ",
-            }[key],
+            stage_label=labels[key],
             event_time=datetime.now(timezone.utc),
             field_value=value,
             comment="",
+        )
+
+    def _record(self, record_id: int, permit: str, worker: str, fields: dict) -> PermitRecord:
+        now = datetime.now(timezone.utc)
+        return PermitRecord(
+            id=record_id,
+            permit_number=permit,
+            device_id=f"device-{record_id}",
+            worker_name=worker,
+            data_json=json.dumps(fields, ensure_ascii=False),
+            first_received_at=now,
+            updated_at=now,
         )
 
     def test_backfill_groups_many_events_into_one_permit_row(self) -> None:
@@ -86,27 +102,37 @@ class PermitRegressionTests(unittest.TestCase):
         self.assertIn("Начало подготовки", result[0]["field_value"])
         self.assertIn("Окончание подготовки", result[0]["field_value"])
 
+    def test_work_state_and_analytics_are_derived_from_permit_fields(self) -> None:
+        stopped = self._record(1, "10001", "Иванов", {
+            "AY": {"field_value": "15.08.2026 10:00", "event_time": "2026-08-15T05:00:00+00:00"},
+            "AZ": {"field_value": "15.08.2026 11:00", "event_time": "2026-08-15T06:00:00+00:00"},
+        })
+        completed = self._record(2, "10002", "Петров", {
+            "AY": {"field_value": "15.08.2026 08:00", "event_time": "2026-08-15T03:00:00+00:00"},
+            "BC": {"field_value": "15.08.2026 12:00", "event_time": "2026-08-15T07:00:00+00:00"},
+        })
+        extended = self._record(3, "10003", "Иванов", {
+            "AY": {"field_value": "15.08.2026 09:00", "event_time": "2026-08-15T04:00:00+00:00"},
+            "BE": {"field_value": "16.08.2026", "event_time": "2026-08-15T06:30:00+00:00"},
+        })
+
+        self.assertEqual(_record_state(stopped), ("Остановлено", "stopped"))
+        self.assertEqual(_record_state(completed), ("Завершено", "done"))
+        self.assertEqual(_record_state(extended), ("Продлено", "extended"))
+
+        analytics = _analytics_context([stopped, completed, extended], [], datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc))
+        self.assertEqual(analytics["total"], 3)
+        self.assertEqual(analytics["stopped"], 1)
+        self.assertEqual(analytics["completed"], 1)
+        self.assertEqual(analytics["active"], 1)
+        self.assertEqual(analytics["extended"], 1)
+        self.assertEqual(analytics["avg_completion_hours"], 4.0)
+        self.assertEqual(analytics["top_workers"][0], {"name": "Иванов", "count": 2})
+
     def _records(self) -> list[PermitRecord]:
-        now = datetime.now(timezone.utc)
         return [
-            PermitRecord(
-                id=1,
-                permit_number="34567",
-                device_id="device-1",
-                worker_name="Иванов И.И.",
-                data_json=json.dumps({"AT": {"field_value": "15.08.2026 11:31", "comment": "", "stage_label": "Начало подготовки"}}, ensure_ascii=False),
-                first_received_at=now,
-                updated_at=now,
-            ),
-            PermitRecord(
-                id=2,
-                permit_number="98765",
-                device_id="device-2",
-                worker_name="Петров П.П.",
-                data_json=json.dumps({"AY": {"field_value": "15.08.2026 12:00", "comment": "", "stage_label": "Фактическое начало работ"}}, ensure_ascii=False),
-                first_received_at=now,
-                updated_at=now,
-            ),
+            self._record(1, "34567", "Иванов И.И.", {"AT": {"field_value": "15.08.2026 11:31", "comment": "", "stage_label": "Начало подготовки"}}),
+            self._record(2, "98765", "Петров П.П.", {"AY": {"field_value": "15.08.2026 12:00", "comment": "", "stage_label": "Фактическое начало работ"}}),
         ]
 
     def test_export_is_one_row_per_permit_and_one_file_email(self) -> None:
@@ -119,7 +145,7 @@ class PermitRegressionTests(unittest.TestCase):
                 xlsx_path, json_path = build_export(self._records(), str(export_dir), batch_id=77)
 
                 ws = load_workbook(xlsx_path, read_only=True).active
-                self.assertEqual(ws.max_row, 3)  # header + 2 permit rows
+                self.assertEqual(ws.max_row, 3)
                 payload = json.loads(json_path.read_text(encoding="utf-8"))
                 self.assertEqual(len(payload["permits"]), 2)
 
@@ -200,12 +226,16 @@ class PermitRegressionTests(unittest.TestCase):
 
 
 class DashboardStaticTests(unittest.TestCase):
-    def test_preview_ui_contract_and_cache_busting(self) -> None:
+    def test_operator_tabs_preview_and_cache_busting(self) -> None:
         server_dir = Path(__file__).resolve().parents[1]
         template = (server_dir / "app/templates/dashboard.html").read_text(encoding="utf-8")
         script = (server_dir / "app/static/dashboard.js").read_text(encoding="utf-8")
 
         for element_id in (
+            'id="tab-transmissions"',
+            'id="tab-works"',
+            'id="tab-analytics"',
+            'id="tab-settings"',
             'id="export-form"',
             'id="preview-modal"',
             'id="preview-list"',
@@ -213,9 +243,18 @@ class DashboardStaticTests(unittest.TestCase):
             'id="confirm-send"',
         ):
             self.assertIn(element_id, template)
+        self.assertIn('href="#settings"', template)
+        self.assertIn('href="#analytics"', template)
+        self.assertIn('data-tab-link="transmissions"', template)
+        self.assertIn('data-tab-link="works"', template)
         self.assertIn("dashboard.js?v=", template)
+        self.assertIn("app.css?v=", template)
+        self.assertIn("preview-table", script)
+        self.assertIn("one", "one")
         self.assertIn("exportForm?.addEventListener('submit'", script)
         self.assertIn("modal.hidden=false", script.replace(" ", ""))
+        self.assertIn("/api/operator/transmissions", script)
+        self.assertIn("/api/operator/events", script)
 
 
 if __name__ == "__main__":
