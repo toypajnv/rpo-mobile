@@ -37,7 +37,13 @@ jobs:
           cache-dependency-path: server/requirements-test.txt
 
       - name: Validate deployment shell scripts
-        run: bash -n ops/autodeploy.sh ops/install-autodeploy.sh
+        run: |
+          bash -n ops/autodeploy.sh ops/install-autodeploy.sh
+          grep -Fx 'ExecStart=/bin/bash /opt/rpo/ops/autodeploy.sh' ops/rpo-autodeploy.service
+          if grep -Eq 'chmod[[:space:]].*ops/autodeploy\.sh' ops/install-autodeploy.sh; then
+            echo 'Installer must not change the tracked autodeploy.sh mode.' >&2
+            exit 1
+          fi
 
       - name: Install backend test dependencies
         run: python -m pip install -r server/requirements-test.txt
