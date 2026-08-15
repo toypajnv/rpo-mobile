@@ -36,6 +36,9 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements-test.txt
 
+      - name: Validate deployment shell scripts
+        run: bash -n ops/autodeploy.sh ops/install-autodeploy.sh
+
       - name: Install backend test dependencies
         run: python -m pip install -r server/requirements-test.txt
 
