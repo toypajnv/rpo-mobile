@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 PROJECT_DIR="/opt/rpo"
 BACKUP_DIR="$PROJECT_DIR/backups/autodeploy"
+STATE_DIR="/var/lib/rpo-autodeploy"
+STATE_FILE="$STATE_DIR/last_successful_sha"
 LOCK_FILE="/run/lock/rpo-autodeploy.lock"
 HEALTH_URL="http://127.0.0.1:8000/health"
 
@@ -21,7 +23,7 @@ healthcheck() {
   return 1
 }
 
-mkdir -p "$(dirname "$LOCK_FILE")" "$BACKUP_DIR"
+mkdir -p "$(dirname "$LOCK_FILE")" "$BACKUP_DIR" "$STATE_DIR"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   log "Another deployment is already running; skipping."
@@ -46,12 +48,15 @@ fi
 git fetch --quiet origin main
 CURRENT_SHA="$(git rev-parse HEAD)"
 TARGET_SHA="$(git rev-parse origin/main)"
+DEPLOYED_SHA="$(cat "$STATE_FILE" 2>/dev/null || true)"
 
-if [[ "$CURRENT_SHA" == "$TARGET_SHA" ]]; then
+# The state file tracks the commit actually rebuilt and health-checked. This
+# also makes the first bootstrap deployment work after the installer pulls main.
+if [[ "$DEPLOYED_SHA" == "$TARGET_SHA" ]]; then
   exit 0
 fi
 
-log "Deploying $CURRENT_SHA -> $TARGET_SHA"
+log "Deploying ${DEPLOYED_SHA:-not-yet-recorded} -> $TARGET_SHA (worktree: $CURRENT_SHA)"
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="$BACKUP_DIR/rpo_${STAMP}_${CURRENT_SHA:0:8}.sql.gz"
@@ -77,7 +82,9 @@ rollback() {
 trap 'rollback' ERR
 
 git checkout -q main
-git merge --ff-only origin/main
+if [[ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]]; then
+  git merge --ff-only origin/main
+fi
 
 docker compose up -d --build
 
@@ -87,6 +94,7 @@ if ! healthcheck; then
 fi
 
 trap - ERR
+printf '%s\n' "$TARGET_SHA" > "$STATE_FILE"
 log "Deployment successful: $(git rev-parse --short HEAD)"
 
 # Keep two weeks of automatic SQL backups.
