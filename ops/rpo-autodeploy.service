@@ -7,7 +7,7 @@ Requires=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/rpo
-ExecStart=/opt/rpo/ops/autodeploy.sh
+ExecStart=/bin/bash /opt/rpo/ops/autodeploy.sh
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
