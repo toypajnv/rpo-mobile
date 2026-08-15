@@ -11,6 +11,8 @@ val configuredServerUrl = (
 val serverUrl = (if (configuredServerUrl.isNotEmpty()) configuredServerUrl else "https://rpo-mng.ru/")
     .let { if (it.endsWith("/")) it else "$it/" }
 
+val stableTestKeystore = file("rpo-test.keystore")
+
 android {
     namespace = "ru.rpo.mobile"
     compileSdk = 35
@@ -19,9 +21,28 @@ android {
         applicationId = "ru.rpo.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.1.1"
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
+    }
+
+    if (stableTestKeystore.exists()) {
+        signingConfigs {
+            create("stableTest") {
+                storeFile = stableTestKeystore
+                storePassword = "rpo-test-2026"
+                keyAlias = "rpo-test"
+                keyPassword = "rpo-test-2026"
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            if (stableTestKeystore.exists()) {
+                signingConfig = signingConfigs.getByName("stableTest")
+            }
+        }
     }
 
     compileOptions {
