@@ -323,12 +323,12 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send() {
+    fun send(): Boolean {
         val s = _state.value
         val validation = validate(s)
         if (validation.errors.isNotEmpty() || validation.events.isEmpty()) {
             _state.value = s.copy(errors = validation.errors, message = "Проверьте заполнение", success = false)
-            return
+            return false
         }
 
         val requests = validation.events.map { event ->
@@ -360,6 +360,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         if (NetworkState.isConnected(application)) {
             viewModelScope.launch { syncPending(showMessage = true) }
         }
+        return true
     }
 
     fun loadHistory() {
