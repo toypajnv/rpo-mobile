@@ -7,30 +7,45 @@
   <div class="server-state"><i></i><div><b>Сервер запущен</b><small>Релиз 1 / MVP</small></div></div>
 </aside>
 <main class="main">
-<header><div><h1>Панель оператора</h1><p>Онлайн-мониторинг переданных данных</p></div><div class="operator"><i></i><span>{{ operator.username }}</span><form method="post" action="/logout"><button class="link-button">Выйти</button></form></div></header>
-{% if request.query_params.get('export') == 'ok' %}<div class="alert success">Выгрузка сформирована и обработана успешно.</div>{% endif %}
+<header><div><h1>Панель оператора</h1><p>Один наряд-допуск — одна строка</p></div><div class="operator"><i></i><span>{{ operator.username }}</span><form method="post" action="/logout"><button class="link-button">Выйти</button></form></div></header>
+{% if request.query_params.get('export') == 'ok' %}<div class="alert success">Выгрузка отправлена одним письмом. Данные сохранены на сервере.</div>{% endif %}
+{% if request.query_params.get('export') == 'duplicate' %}<div class="alert success">Повторная отправка заблокирована: эта выгрузка уже была обработана.</div>{% endif %}
 <section class="stats">
- <article><span class="round blue">↓</span><div><small>Получено сегодня</small><strong>{{ received_today }}</strong><em>записей</em></div></article>
- <article><span class="round orange">!</span><div><small>Не выгружено</small><strong>{{ pending }}</strong><em>записей</em></div></article>
+ <article><span class="round blue">↓</span><div><small>Изменено сегодня</small><strong>{{ received_today }}</strong><em>нарядов-допусков</em></div></article>
+ <article><span class="round orange">!</span><div><small>Не выгружено</small><strong>{{ pending }}</strong><em>нарядов-допусков</em></div></article>
  <article><span class="round green">♟</span><div><small>Активные работники</small><strong>{{ active_workers }}</strong><em>за 12 часов</em></div></article>
  <article><span class="round violet">◷</span><div><small>Последняя выгрузка</small><strong class="small-strong">{% if last_export %}{{ last_export.created_at.astimezone().strftime('%d.%m.%Y %H:%M') }}{% else %}—{% endif %}</strong><em>{% if last_export %}{{ last_export.recipient }}{% else %}ещё не было{% endif %}</em></div></article>
 </section>
 <section class="content-grid">
   <article class="panel" id="events">
-    <div class="panel-title"><h2>Переданные данные онлайн</h2><span class="online"><i></i> Онлайн</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Получено</th><th>Работник</th><th>НД</th><th>Поле</th><th>Этап</th><th>Значение</th><th>Статус</th></tr></thead><tbody id="events-body">
-    {% for e in events %}<tr><td>{{ e.received_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><b>{{ e.worker_name }}</b></td><td>{{ e.permit_number }}</td><td><code>{{ e.field_key }}</code></td><td>{{ e.stage_label }}</td><td>{{ e.field_value }}</td><td>{% if e.exported_at %}<span class="badge done">Выгружено</span>{% else %}<span class="badge pending">Не выгружено</span>{% endif %}</td></tr>{% endfor %}
+    <div class="panel-title"><h2>Наряды-допуски</h2><span class="online"><i></i> Онлайн</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Обновлено</th><th>Работник</th><th>НД</th><th>Данные по этапам</th><th>Статус</th></tr></thead><tbody id="events-body">
+    {% for e in events %}<tr><td>{{ e.updated_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><b>{{ e.worker_name }}</b></td><td><b>{{ e.permit_number }}</b></td><td class="summary-cell"><pre>{{ e.summary }}</pre>{% if e.comments %}<small class="row-comment">{{ e.comments }}</small>{% endif %}</td><td>{% if e.exported_at %}<span class="badge done">Выгружено</span>{% else %}<span class="badge pending">Не выгружено</span>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
   </article>
   <aside class="right-stack" id="exports">
-    <article class="panel export-card"><h2>Выгрузка на email</h2><form method="post" action="/exports" id="export-form">
+    <article class="panel export-card"><h2>Выгрузка на email</h2><form id="export-form">
       <label>Период с<input type="datetime-local" name="period_from" id="period-from" required></label>
       <label>По<input type="datetime-local" name="period_to" id="period-to" required></label>
-      <label>Email получателя<input type="email" name="recipient" placeholder="operator@example.ru" required></label>
+      <label>Email получателя<input type="email" name="recipient" id="recipient" placeholder="operator@example.ru" required></label>
       <div class="presets"><button type="button" data-period="today">Сегодня</button><button type="button" data-period="shift">Смена</button><button type="button" data-period="week">Неделя</button></div>
-      <button class="primary" type="submit">✈ Сформировать и отправить</button>
-    </form><div class="info-box">ⓘ В выгрузку попадают только невыгруженные записи выбранного периода. После отправки данные остаются в БД.</div></article>
-    <article class="panel"><h2>История выгрузок</h2><div class="export-list">{% for x in exports %}<div><span><b>№{{ x.id }}</b> · {{ x.created_at.astimezone().strftime('%d.%m.%Y %H:%M') }}<small>{{ x.event_count }} записей → {{ x.recipient }}</small></span><span class="badge {% if x.status in ['sent','saved_to_outbox'] %}done{% else %}pending{% endif %}">{{ 'Отправлено' if x.status == 'sent' else ('Сформировано' if x.status == 'saved_to_outbox' else x.status) }}</span></div>{% else %}<p class="muted">Выгрузок пока нет</p>{% endfor %}</div></article>
+      <button class="primary" type="submit">👁 Просмотреть перед отправкой</button>
+    </form><div class="info-box">ⓘ Перед отправкой откроется окно проверки. В нём можно исправить ФИО, даты, время и комментарии. Весь период отправляется одним письмом.</div></article>
+    <article class="panel"><h2>История выгрузок</h2><div class="export-list">{% for x in exports %}<div><span><b>№{{ x.id }}</b> · {{ x.created_at.astimezone().strftime('%d.%m.%Y %H:%M') }}<small>{{ x.event_count }} НД → {{ x.recipient }}</small></span><span class="badge {% if x.status in ['sent','saved_to_outbox'] %}done{% else %}pending{% endif %}">{{ 'Отправлено' if x.status == 'sent' else ('Сформировано' if x.status == 'saved_to_outbox' else x.status) }}</span></div>{% else %}<p class="muted">Выгрузок пока нет</p>{% endfor %}</div></article>
   </aside>
 </section>
-</main><script src="/static/dashboard.js"></script></body></html>
+</main>
+<div class="modal-backdrop" id="preview-modal" hidden>
+  <section class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+    <div class="preview-head"><div><h2 id="preview-title">Проверка перед отправкой</h2><p>Каждый наряд-допуск показан одной карточкой. Исправьте данные при необходимости.</p></div><button type="button" class="modal-close" id="preview-close">×</button></div>
+    <div class="preview-list" id="preview-list"></div>
+    <form method="post" action="/exports/send" id="confirm-export-form">
+      <input type="hidden" name="period_from" id="confirm-period-from">
+      <input type="hidden" name="period_to" id="confirm-period-to">
+      <input type="hidden" name="recipient" id="confirm-recipient">
+      <input type="hidden" name="edited_json" id="edited-json">
+      <div class="preview-actions"><button type="button" class="secondary-btn" id="preview-cancel">Вернуться к фильтру</button><button type="submit" class="primary" id="confirm-send">✈ Отправить одним письмом</button></div>
+    </form>
+  </section>
+</div>
+<script src="/static/dashboard.js"></script></body></html>
