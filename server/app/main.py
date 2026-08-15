@@ -107,6 +107,10 @@ def ensure_permit_records() -> None:
         events = list(db.scalars(select(MobileEvent).order_by(MobileEvent.received_at.asc(), MobileEvent.id.asc())))
         for event in events:
             _apply_event_to_record(db, event)
+            # Make the just-created permit visible to the next SELECT in this
+            # same transaction, so subsequent stages update one row instead
+            # of trying to insert duplicate permit_number values.
+            db.flush()
         db.commit()
 
 
