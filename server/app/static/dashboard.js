@@ -6,16 +6,49 @@ const fmt = (iso) => {
 };
 const esc = (s='') => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 
-async function refreshEvents(){
-  try{
-    const r=await fetch('/api/operator/events?limit=100',{credentials:'same-origin',cache:'no-store'}); if(!r.ok)return;
-    const rows=await r.json();
-    const body=document.querySelector('#events-body');
-    if(!body)return;
-    body.innerHTML=rows.map(e=>`<tr><td>${esc(e.updated_at_display || fmt(e.updated_at))}</td><td><b>${esc(e.worker_name)}</b></td><td><b>${esc(e.permit_number)}</b></td><td class="summary-cell"><pre>${esc(e.summary)}</pre>${e.comments?`<small class="row-comment">${esc(e.comments)}</small>`:''}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td></tr>`).join('');
-  }catch(e){console.error('refreshEvents',e)}
+const tabMeta = {
+  home: ['Панель оператора','Сводка по нарядам-допускам'],
+  transmissions: ['Переданные данные','Журнал сообщений, поступивших с мобильных устройств'],
+  works: ['Работы','Один наряд-допуск — одна строка'],
+  analytics: ['Аналитика','Оперативные показатели по работам и этапам'],
+  exports: ['Выгрузки','Проверка, редактирование и отправка данных'],
+  users: ['Пользователи','Доступ к операторской панели'],
+  settings: ['Настройки','Параметры сервера и интеграций'],
+};
+function activateTab(name, updateHash=true){
+  if(!tabMeta[name]) name='home';
+  document.querySelectorAll('[data-tab]').forEach(s=>{s.hidden=s.dataset.tab!==name});
+  document.querySelectorAll('[data-tab-link]').forEach(a=>a.classList.toggle('active',a.dataset.tabLink===name));
+  const title=document.querySelector('#page-title'), subtitle=document.querySelector('#page-subtitle');
+  if(title) title.textContent=tabMeta[name][0];
+  if(subtitle) subtitle.textContent=tabMeta[name][1];
+  if(updateHash && location.hash!==`#${name}`) history.replaceState(null,'',`${location.pathname}${location.search}#${name}`);
 }
-setInterval(refreshEvents,4000);
+document.querySelectorAll('[data-tab-link]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();activateTab(a.dataset.tabLink)}));
+document.querySelectorAll('[data-open-tab]').forEach(b=>b.addEventListener('click',()=>activateTab(b.dataset.openTab)));
+window.addEventListener('hashchange',()=>activateTab(location.hash.slice(1)||'home',false));
+activateTab(location.hash.slice(1)||'home',false);
+
+async function refreshWorks(){
+  try{
+    const r=await fetch('/api/operator/events?limit=200',{credentials:'same-origin',cache:'no-store'}); if(!r.ok)return;
+    const rows=await r.json();
+    const body=document.querySelector('#works-body');
+    if(!body)return;
+    body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.updated_at))}</td><td><b>${esc(e.permit_number)}</b></td><td><b>${esc(e.worker_name)}</b></td><td><span class="work-state ${esc(e.status_class)}">${esc(e.status)}</span></td><td><div class="progress"><span style="width:${Number(e.progress)||0}%"></span></div><small>${Number(e.stage_count)||0} этап(ов)</small></td><td class="summary-cell"><pre>${esc(e.summary)}</pre>${e.comments?`<small class="row-comment">${esc(e.comments)}</small>`:''}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td></tr>`).join('');
+  }catch(e){console.error('refreshWorks',e)}
+}
+
+async function refreshTransmissions(){
+  try{
+    const r=await fetch('/api/operator/transmissions?limit=300',{credentials:'same-origin',cache:'no-store'}); if(!r.ok)return;
+    const rows=await r.json();
+    const body=document.querySelector('#transmissions-body');
+    if(!body)return;
+    body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.received_at))}</td><td><b>${esc(e.worker_name)}</b></td><td><b>${esc(e.permit_number)}</b></td><td><span class="stage-code">${esc(e.field_key)}</span> ${esc(e.stage_label)}</td><td>${esc(e.field_value)}</td><td class="wrap-cell">${esc(e.comment||'—')}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Ожидает'}</span></td></tr>`).join('');
+  }catch(e){console.error('refreshTransmissions',e)}
+}
+setInterval(()=>{refreshWorks();refreshTransmissions()},5000);
 
 const pad=n=>String(n).padStart(2,'0');
 function localInput(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`}
@@ -43,16 +76,22 @@ modal?.addEventListener('click',e=>{if(e.target===modal)closePreview()});
 
 function renderPreview(records, keys){
   if(!previewList)return;
-  previewList.innerHTML=records.map((r,ri)=>{
-    const fields=keys.map(key=>{
+  const rows=records.map((r,ri)=>{
+    const stages=keys.map(key=>{
       const f=r.fields[key]||{label:key,field_value:'',comment:''};
-      return `<div class="preview-field">
-        <label>${esc(key)} · ${esc(f.label)}<input data-ri="${ri}" data-key="${esc(key)}" data-kind="value" value="${esc(f.field_value)}" placeholder="Не заполнено"></label>
-        <label class="comment-label">Комментарий<textarea data-ri="${ri}" data-key="${esc(key)}" data-kind="comment" rows="2" placeholder="Комментарий">${esc(f.comment)}</textarea></label>
+      return `<div class="preview-stage-line">
+        <span class="preview-stage-name"><b>${esc(key)}</b><small>${esc(f.label)}</small></span>
+        <input data-ri="${ri}" data-key="${esc(key)}" data-kind="value" value="${esc(f.field_value)}" placeholder="Не заполнено">
+        <input data-ri="${ri}" data-key="${esc(key)}" data-kind="comment" value="${esc(f.comment)}" placeholder="Комментарий">
       </div>`;
     }).join('');
-    return `<article class="permit-preview" data-ri="${ri}"><div class="permit-preview-title"><strong>НД ${esc(r.permit_number)}</strong><span>${esc(r.updated_at_display || fmt(r.updated_at))}</span></div><label>ФИО работника<input data-ri="${ri}" data-kind="worker" value="${esc(r.worker_name)}"></label><div class="preview-fields">${fields}</div></article>`;
+    return `<tr data-ri="${ri}">
+      <td class="preview-nd"><strong>${esc(r.permit_number)}</strong><small>${esc(r.updated_at_display||fmt(r.updated_at))}</small></td>
+      <td class="preview-worker"><input data-ri="${ri}" data-kind="worker" value="${esc(r.worker_name)}"></td>
+      <td class="preview-stage-cell">${stages}</td>
+    </tr>`;
   }).join('');
+  previewList.innerHTML=`<div class="preview-table-wrap"><table class="preview-table"><thead><tr><th>НД / обновлено</th><th>Работник</th><th>Этапы: значение и комментарий</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function collectPreview(){
