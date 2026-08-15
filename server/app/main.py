@@ -461,7 +461,7 @@ def send_export_confirmed(
     xlsx_path, json_path = build_export(selected, settings.export_dir, batch.id)
 
     try:
-        send_export(
+        delivery_result = send_export(
             recipient,
             f"РПО — выгрузка №{batch.id}",
             (
@@ -470,6 +470,7 @@ def send_export_confirmed(
                 "Во вложении единая выгрузка по выбранному периоду. Каждому НД соответствует одна строка."
             ),
             [xlsx_path, json_path],
+            idempotency_key=f"rpo-export-{batch.id}",
         )
     except Exception as exc:
         batch.status = "error"
@@ -478,7 +479,7 @@ def send_export_confirmed(
         raise HTTPException(status_code=500, detail=f"Файлы сформированы, но отправка не удалась: {exc}")
 
     sent_at = utcnow()
-    batch.status = "sent" if settings.mail_mode.lower() == "smtp" else "saved_to_outbox"
+    batch.status = "saved_to_outbox" if delivery_result.startswith("file:") else "sent"
     batch.sent_at = sent_at
     batch.file_name = xlsx_path.name
     permit_numbers = []
