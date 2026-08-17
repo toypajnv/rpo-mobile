@@ -26,3 +26,17 @@ data class EventResponse(
 )
 
 data class ApiError(val detail: String? = null)
+
+
+data class PermitFieldSnapshot(
+    val field_value: String = "",
+    val event_time: String = "",
+    val comment: String = "",
+)
+
+data class PermitSnapshot(
+    val permit_number: String,
+    val worker_name: String,
+    val updated_at: String,
+    val fields: Map<String, PermitFieldSnapshot> = emptyMap(),
+)

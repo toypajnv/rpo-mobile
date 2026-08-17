@@ -12,4 +12,7 @@ interface RpoApi {
 
     @GET("api/mobile/events")
     suspend fun history(@Query("device_id") deviceId: String, @Query("limit") limit: Int = 30): Response<List<EventResponse>>
+
+    @GET("api/mobile/permit")
+    suspend fun permit(@Query("permit_number") permitNumber: String): Response<PermitSnapshot>
 }

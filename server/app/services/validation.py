@@ -26,6 +26,8 @@ def validate_event(db: Session, payload: EventCreate) -> None:
 
     stage = STAGES[payload.field_key]
     if stage.get("comment_required") and len(payload.comment.strip()) < 3:
+        if payload.field_key == "BA":
+            raise EventValidationError("Для возобновления работ необходимо указать комментарий")
         raise EventValidationError("Для остановки работ необходимо указать причину")
 
     if stage["kind"] == "text" and len(payload.field_value.strip()) < 2:

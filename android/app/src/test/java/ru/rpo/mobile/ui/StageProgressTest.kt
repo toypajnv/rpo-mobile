@@ -8,14 +8,14 @@ import org.junit.Test
 class StageProgressTest {
     @Test
     fun savedStageCountIgnoresUnknownIds() {
-        val saved = setOf("PREPARATION", "START_WORK", "OLD_REMOVED_STAGE")
+        val saved = setOf("PREPARATION", "TRANSFER_WORK", "OLD_REMOVED_STAGE")
         assertEquals(2, savedStageCount(saved))
     }
 
     @Test
     fun switchingWithUnsavedChangesRequiresWarning() {
         val current = stages.first { it.id == "PREPARATION" }
-        val target = stages.first { it.id == "START_WORK" }
+        val target = stages.first { it.id == "TRANSFER_WORK" }
 
         assertTrue(shouldWarnBeforeStageSwitch(current, target, hasUnsavedChanges = true))
         assertFalse(shouldWarnBeforeStageSwitch(current, target, hasUnsavedChanges = false))

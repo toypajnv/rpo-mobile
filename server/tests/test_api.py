@@ -49,3 +49,43 @@ def test_operator_login():
         assert r.status_code == 303
         r2 = c.get("/api/operator/events")
         assert r2.status_code == 200
+
+
+def test_mobile_permit_lookup_returns_previous_server_data():
+    with TestClient(app) as c:
+        payload = event_payload(
+            client_event_id="33333333-3333-3333-3333-333333333333",
+            permit_number="НД-1708",
+            field_key="AT",
+            stage_label="Начало подготовки",
+            field_value="17.08.2026 09:15",
+            event_time="2026-08-17T04:15:00+00:00",
+            comment="Начало подготовки",
+        )
+        created = c.post("/api/mobile/events", json=payload)
+        assert created.status_code == 201, created.text
+        result = c.get("/api/mobile/permit", params={"permit_number": "нд-1708"})
+        assert result.status_code == 200, result.text
+        body = result.json()
+        assert body["permit_number"] == "НД-1708"
+        assert body["worker_name"] == "Иванов Иван Иванович"
+        assert body["fields"]["AT"]["field_value"] == "17.08.2026 09:15"
+        assert body["fields"]["AT"]["comment"] == "Начало подготовки"
+
+
+def test_resume_requires_comment_on_server():
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/mobile/events",
+            json=event_payload(
+                client_event_id="44444444-4444-4444-4444-444444444444",
+                permit_number="НД-RESUME",
+                field_key="BA",
+                stage_label="Возобновление работ",
+                event_time="2026-08-17T05:00:00+00:00",
+                field_value="17.08.2026 10:00",
+                comment="",
+            ),
+        )
+        assert r.status_code == 422, r.text
+        assert "комментар" in r.json()["detail"].lower()

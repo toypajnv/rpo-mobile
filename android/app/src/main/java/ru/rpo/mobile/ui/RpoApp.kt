@@ -1,5 +1,6 @@
 package ru.rpo.mobile.ui
 
+import android.app.DatePickerDialog
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 private val Navy = Color(0xFF073C77)
 private val Blue = Color(0xFF0D63E6)
@@ -122,8 +125,9 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
     val context = LocalContext.current
     val permitKey = s.permitNumber.trim().uppercase()
     var savedStageIds by remember(permitKey) { mutableStateOf(loadSavedStageIds(context, permitKey)) }
+    val combinedSavedStageIds = savedStageIds + s.serverSavedStageIds
     var pendingStage by remember(permitKey) { mutableStateOf<Stage?>(null) }
-    var baseline by remember(permitKey, s.stage.id) { mutableStateOf(stageFingerprint(s)) }
+    var baseline by remember(permitKey, s.stage.id, s.serverSavedStageIds) { mutableStateOf(stageFingerprint(s)) }
     val currentFingerprint = stageFingerprint(s)
     val hasUnsavedChanges = currentFingerprint != baseline
 
@@ -204,7 +208,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
         PermitField(s.permitNumber, permitMemories, vm::updatePermit, vm::selectPermit, s.errors["permit"])
         StagePicker(
             selected = s.stage,
-            savedStageIds = savedStageIds,
+            savedStageIds = combinedSavedStageIds,
             hasUnsavedChanges = hasUnsavedChanges,
             onSelect = { next ->
                 if (next.id != s.stage.id) {
@@ -291,7 +295,15 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
                     onNow = vm::nowPrimary,
                     error = s.errors["primary"],
                 )
-                Field("Комментарий (необязательно)", s.comment, vm::updateComment, "Комментарий к этапу", null, singleLine = false)
+                val resume = s.stage.id == "RESUME_WORK"
+                Field(
+                    if (resume) "Комментарий (обязательно)" else "Комментарий (необязательно)",
+                    s.comment,
+                    vm::updateComment,
+                    if (resume) "Укажите условия или основание возобновления" else "Комментарий к этапу",
+                    if (resume) s.errors["comment"] else null,
+                    singleLine = false,
+                )
             }
 
             StageKind.STOP -> {
@@ -318,7 +330,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
                 Text("Новая дата окончания работ", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
                     Box(Modifier.weight(1f)) {
-                        Field(null, s.extensionDate, vm::updateExtensionDate, "ДД.ММ.ГГГГ", s.errors["extension"])
+                        DateField(s.extensionDate, vm::updateExtensionDate, s.errors["extension"])
                     }
                     OutlinedButton(onClick = vm::extensionTomorrow, modifier = Modifier.height(56.dp)) {
                         Icon(Icons.Default.Event, null)
@@ -333,7 +345,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
         Button(
             onClick = {
                 if (vm.send()) {
-                    val updated = savedStageIds + s.stage.id
+                    val updated = combinedSavedStageIds + s.stage.id
                     savedStageIds = updated
                     persistSavedStageIds(context, permitKey, updated)
                     baseline = currentFingerprint
@@ -353,8 +365,8 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 CheckLine(s.workerName.trim().length >= 3, "ФИО указано")
                 CheckLine(s.permitNumber.trim().length >= 3 && s.errors["permit"] == null, "Номер НД корректен")
-                CheckLine(s.errors.keys.none { it in setOf("primary", "secondary", "third", "extension", "stopReason") }, "Данные этапа заполнены")
-                CheckLine(s.stage.id in savedStageIds && !hasUnsavedChanges, "Текущий этап сохранён")
+                CheckLine(s.errors.keys.none { it in setOf("primary", "secondary", "third", "extension", "stopReason", "comment") }, "Данные этапа заполнены")
+                CheckLine(s.stage.id in combinedSavedStageIds && !hasUnsavedChanges, "Текущий этап сохранён")
                 CheckLine(true, "При отсутствии сети данные сохранятся локально")
             }
         }
@@ -426,6 +438,35 @@ private fun PermitField(
     }
 }
 
+private val uiDateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+
+@Composable
+private fun DateField(value: String, onDate: (String) -> Unit, error: String?) {
+    val context = LocalContext.current
+    val openPicker = {
+        val initial = runCatching { LocalDate.parse(value, uiDateFormatter) }.getOrElse { LocalDate.now() }
+        DatePickerDialog(
+            context,
+            { _, year, month, day -> onDate(String.format("%02d.%02d.%04d", day, month + 1, year)) },
+            initial.year,
+            initial.monthValue - 1,
+            initial.dayOfMonth,
+        ).show()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        OutlinedButton(
+            onClick = openPicker,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(11.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
+        ) {
+            Text(value.ifBlank { "Выберите дату" }, Modifier.weight(1f), color = if (value.isBlank()) Color.Gray else Color.Unspecified)
+            Icon(Icons.Default.Event, "Открыть календарь")
+        }
+        if (error != null) Text(error, color = Red, fontSize = 12.sp)
+    }
+}
+
 @Composable
 private fun DateTimeBlock(
     title: String,
@@ -439,7 +480,7 @@ private fun DateTimeBlock(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-            Box(Modifier.weight(1f)) { Field(null, date, onDate, "ДД.ММ.ГГГГ", error) }
+            Box(Modifier.weight(1f)) { DateField(date, onDate, error) }
             Box(Modifier.weight(.72f)) { Field(null, time, onTime, "ЧЧ:ММ", null) }
             OutlinedButton(onClick = onNow, modifier = Modifier.height(56.dp)) {
                 Icon(Icons.Default.Schedule, null)
@@ -613,9 +654,9 @@ private fun HelpScreen() {
         Text(
             "1. Укажите ФИО — приложение запомнит его на этом устройстве.\n\n" +
                 "2. Введите номер НД. Ранее использованные номера появляются в подсказках и могут быть подставлены одним нажатием.\n\n" +
-                "3. Выберите укрупнённый этап. «Передача и начало работ» содержит передачу, фактическое начало и окончание работ.\n\n" +
+                "3. Выберите этап. Передача объекта и фактическое начало/окончание работ теперь заполняются отдельными блоками.\n\n" +
                 "4. Заполните выбранный этап и обязательно нажмите «Сохранить этап». Сохранённые этапы отмечаются зелёной галочкой. При попытке уйти с изменённого, но не сохранённого этапа приложение покажет предупреждение.\n\n" +
-                "5. Для дат и времени можно использовать кнопку «Сейчас». Для остановки работ обязательно укажите время и причину. Для продления РПО укажите новую дату окончания.\n\n" +
+                "5. Дату выбирайте из календаря, время вводите вручную или кнопкой «Сейчас». Для остановки обязательна причина, а для возобновления — комментарий. Для продления РПО укажите новую дату окончания.\n\n" +
                 "6. После нажатия «Сохранить этап» данные сначала сохраняются на телефоне. Если интернета нет, они останутся в очереди и отправятся автоматически после появления сети.\n\n" +
                 "7. Для синхронизации подходит любая интернет-сеть, включая медленное мобильное соединение 2G. Передаваемые пакеты данных небольшие."
         )
