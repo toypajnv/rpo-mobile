@@ -1,0 +1,54 @@
+name: Production Smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-smoke:
+    name: Production health and API contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Wait for VPS autodeploy and health
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for attempt in $(seq 1 36); do
+            if response="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null)" \
+              && [[ "$response" == *'"status":"ok"'* ]]; then
+              echo "Production health is OK on attempt $attempt"
+              echo "$response"
+              ok=1
+              break
+            fi
+            echo "Waiting for production autodeploy: attempt $attempt/36"
+            sleep 10
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "Production health did not become ready in time" >&2
+            exit 1
+          fi
+
+      - name: Verify mobile permit prefill API is deployed
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 10 https://rpo-mng.ru/openapi.json -o /tmp/rpo-openapi.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          spec = json.loads(Path('/tmp/rpo-openapi.json').read_text())
+          paths = spec.get('paths', {})
+          required = '/api/mobile/permit'
+          if required not in paths:
+              raise SystemExit(f'Missing deployed API route: {required}')
+          print(f'Deployed API route confirmed: {required}')
+          PY
