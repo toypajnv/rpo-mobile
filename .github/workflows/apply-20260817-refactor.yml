@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'ops/apply_20260817_refactor.py'
+      - 'ops/patch_20260817_followup.py'
       - '.github/workflows/apply-20260817-refactor.yml'
 
 permissions:
@@ -31,7 +32,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply code refactor
-        run: python ops/apply_20260817_refactor.py
+        run: |
+          python ops/apply_20260817_refactor.py
+          python ops/patch_20260817_followup.py
 
       - name: Check diff
         run: git diff --check
