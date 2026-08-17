@@ -22,12 +22,17 @@ val stages = listOf(
         second = StageEvent("AU", "Окончание подготовки"),
     ),
     Stage(
-        id = "START_WORK",
-        title = "Передача и начало работ",
-        kind = StageKind.TRIPLE_DATETIME,
+        id = "TRANSFER_WORK",
+        title = "Передача объекта",
+        kind = StageKind.DATETIME,
         first = StageEvent("AV", "Передача ОП к ОБПР"),
-        second = StageEvent("AY", "Фактическое начало работ"),
-        third = StageEvent("BC", "Окончание работ"),
+    ),
+    Stage(
+        id = "ACTUAL_WORK",
+        title = "Фактическое начало и окончание работ",
+        kind = StageKind.RANGE_DATETIME,
+        first = StageEvent("AY", "Фактическое начало работ"),
+        second = StageEvent("BC", "Фактическое окончание работ"),
     ),
     Stage(
         id = "STOP_WORK",
@@ -50,6 +55,11 @@ val stages = listOf(
 )
 
 fun savedStageCount(savedStageIds: Set<String>): Int = stages.count { it.id in savedStageIds }
+
+fun savedStageIdsForFieldKeys(fieldKeys: Set<String>): Set<String> = stages
+    .filter { stage -> listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key).all { it in fieldKeys } }
+    .map { it.id }
+    .toSet()
 
 fun shouldWarnBeforeStageSwitch(current: Stage, target: Stage, hasUnsavedChanges: Boolean): Boolean =
     current.id != target.id && hasUnsavedChanges

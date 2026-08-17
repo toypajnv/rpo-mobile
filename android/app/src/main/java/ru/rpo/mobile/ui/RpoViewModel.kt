@@ -11,9 +11,12 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.rpo.mobile.data.EventRequest
 import ru.rpo.mobile.data.EventResponse
+import ru.rpo.mobile.data.PermitSnapshot
 import ru.rpo.mobile.data.NetworkState
 import ru.rpo.mobile.data.PendingEventStore
 import ru.rpo.mobile.data.PendingSyncScheduler
@@ -41,13 +44,13 @@ data class FormState(
     val workerName: String = "",
     val permitNumber: String = "",
     val stage: Stage = stages.first(),
-    val primaryDate: String = LocalDate.now().format(dateFmt),
-    val primaryTime: String = LocalTime.now().format(timeFmt),
-    val secondaryDate: String = LocalDate.now().format(dateFmt),
-    val secondaryTime: String = LocalTime.now().format(timeFmt),
-    val thirdDate: String = LocalDate.now().format(dateFmt),
-    val thirdTime: String = LocalTime.now().format(timeFmt),
-    val extensionDate: String = LocalDate.now().plusDays(1).format(dateFmt),
+    val primaryDate: String = "",
+    val primaryTime: String = "",
+    val secondaryDate: String = "",
+    val secondaryTime: String = "",
+    val thirdDate: String = "",
+    val thirdTime: String = "",
+    val extensionDate: String = "",
     val stopReason: String = "",
     val comment: String = "",
     val errors: Map<String, String> = emptyMap(),
@@ -56,6 +59,7 @@ data class FormState(
     val success: Boolean = false,
     val pendingCount: Int = 0,
     val failedCount: Int = 0,
+    val serverSavedStageIds: Set<String> = emptySet(),
 )
 
 private data class PendingEvent(
@@ -76,6 +80,8 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     private val gson = Gson()
     private val queueStore = PendingEventStore(app)
     private val connectivityManager = app.getSystemService(ConnectivityManager::class.java)
+    private var permitLookupJob: Job? = null
+    private var serverPermitSnapshot: PermitSnapshot? = null
 
     private val _state = MutableStateFlow(
         FormState(
@@ -135,15 +141,99 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         _permitMemories.value = limited
     }
 
+    private fun blankStageFields(base: FormState, stage: Stage = base.stage): FormState = base.copy(
+        stage = stage,
+        primaryDate = "",
+        primaryTime = "",
+        secondaryDate = "",
+        secondaryTime = "",
+        thirdDate = "",
+        thirdTime = "",
+        extensionDate = "",
+        stopReason = "",
+        comment = "",
+        errors = base.errors.filterKeys { it == "worker" || it == "permit" },
+        message = null,
+    )
+
+    private fun snapshotDateTime(snapshot: PermitSnapshot, key: String?): Pair<String, String> {
+        if (key == null) return "" to ""
+        val raw = snapshot.fields[key]?.field_value.orEmpty().trim()
+        val parsed = runCatching { LocalDateTime.parse(raw, valueFmt) }.getOrNull() ?: return "" to ""
+        return parsed.toLocalDate().format(dateFmt) to parsed.toLocalTime().format(timeFmt)
+    }
+
+    private fun applySnapshotToStage(base: FormState, stage: Stage, snapshot: PermitSnapshot?): FormState {
+        val cleared = blankStageFields(base, stage)
+        if (snapshot == null || !snapshot.permit_number.equals(base.permitNumber.trim(), ignoreCase = true)) return cleared
+        val first = snapshotDateTime(snapshot, stage.first.key)
+        val second = snapshotDateTime(snapshot, stage.second?.key)
+        val third = snapshotDateTime(snapshot, stage.third?.key)
+        val stageFields = listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key).mapNotNull { snapshot.fields[it] }
+        val commonComment = stageFields.firstOrNull { it.comment.isNotBlank() }?.comment.orEmpty()
+        return cleared.copy(
+            primaryDate = first.first,
+            primaryTime = first.second,
+            secondaryDate = second.first,
+            secondaryTime = second.second,
+            thirdDate = third.first,
+            thirdTime = third.second,
+            extensionDate = if (stage.kind == StageKind.EXTENSION_DATE) snapshot.fields[stage.first.key]?.field_value.orEmpty() else "",
+            stopReason = if (stage.kind == StageKind.STOP) snapshot.fields[stage.first.key]?.comment.orEmpty() else "",
+            comment = if (stage.kind == StageKind.STOP) "" else commonComment,
+        )
+    }
+
+    private fun schedulePermitLookup(permitNumber: String, immediate: Boolean = false) {
+        permitLookupJob?.cancel()
+        val normalized = permitNumber.trim().uppercase()
+        if (!permitRegex.matches(normalized)) {
+            serverPermitSnapshot = null
+            _state.value = _state.value.copy(serverSavedStageIds = emptySet())
+            return
+        }
+        permitLookupJob = viewModelScope.launch {
+            if (!immediate) delay(550)
+            if (!NetworkState.isConnected(application)) return@launch
+            try {
+                val response = ru.rpo.mobile.data.ApiFactory.api.permit(normalized)
+                if (_state.value.permitNumber.trim().uppercase() != normalized) return@launch
+                if (response.isSuccessful) {
+                    val snapshot = response.body() ?: return@launch
+                    serverPermitSnapshot = snapshot
+                    val filledKeys = snapshot.fields.filterValues { it.field_value.isNotBlank() }.keys
+                    val worker = snapshot.worker_name.ifBlank { _state.value.workerName }
+                    val base = _state.value.copy(
+                        workerName = worker,
+                        serverSavedStageIds = savedStageIdsForFieldKeys(filledKeys),
+                        errors = _state.value.errors - "worker" - "permit",
+                        message = "Ранее заполненные данные по НД загружены с сервера",
+                        success = true,
+                    )
+                    _state.value = applySnapshotToStage(base, base.stage, snapshot)
+                    if (worker.isNotBlank()) prefs.edit().putString("worker_name", worker).apply()
+                } else if (response.code() == 404) {
+                    serverPermitSnapshot = null
+                    _state.value = _state.value.copy(serverSavedStageIds = emptySet())
+                }
+            } catch (_: Exception) {
+                // Работа без сети остаётся доступной; серверное автозаполнение повторится при следующем вводе номера.
+            }
+        }
+    }
+
     fun selectPermit(memory: PermitMemory) {
         val worker = memory.workerName.ifBlank { _state.value.workerName }
-        _state.value = _state.value.copy(
+        _state.value = blankStageFields(_state.value).copy(
             permitNumber = memory.permitNumber,
             workerName = worker,
+            serverSavedStageIds = emptySet(),
             errors = _state.value.errors - "permit" - "worker",
             message = null,
         )
+        serverPermitSnapshot = null
         if (worker.isNotBlank()) prefs.edit().putString("worker_name", worker).apply()
+        schedulePermitLookup(memory.permitNumber, immediate = true)
     }
 
     fun updateWorker(v: String) {
@@ -157,25 +247,19 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         val errors = _state.value.errors.toMutableMap()
         if (hasInvalidChar) errors["permit"] = "Допустимы только буквы, цифры, пробел и символы . _ / -"
         else errors.remove("permit")
-        _state.value = _state.value.copy(permitNumber = value, errors = errors, message = null)
+        serverPermitSnapshot = null
+        _state.value = blankStageFields(_state.value).copy(
+            permitNumber = value,
+            errors = errors,
+            serverSavedStageIds = emptySet(),
+            message = null,
+        )
+        schedulePermitLookup(value)
     }
 
     fun updateStage(v: Stage) {
-        val now = LocalDateTime.now()
-        _state.value = _state.value.copy(
-            stage = v,
-            primaryDate = now.toLocalDate().format(dateFmt),
-            primaryTime = now.toLocalTime().format(timeFmt),
-            secondaryDate = now.toLocalDate().format(dateFmt),
-            secondaryTime = now.toLocalTime().format(timeFmt),
-            thirdDate = now.toLocalDate().format(dateFmt),
-            thirdTime = now.toLocalTime().format(timeFmt),
-            extensionDate = now.toLocalDate().plusDays(1).format(dateFmt),
-            stopReason = "",
-            comment = "",
-            errors = _state.value.errors.filterKeys { it == "worker" || it == "permit" },
-            message = null,
-        )
+        val snapshot = serverPermitSnapshot
+        _state.value = applySnapshotToStage(_state.value, v, snapshot)
     }
 
     fun updatePrimaryDate(v: String) { _state.value = _state.value.copy(primaryDate = v.take(10), message = null) }
@@ -208,16 +292,9 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun parseDateTime(date: String, time: String, errorKey: String, errors: MutableMap<String, String>): LocalDateTime? {
-        val dt = try {
-            LocalDateTime.of(LocalDate.parse(date, dateFmt), LocalTime.parse(time, timeFmt))
-        } catch (_: Exception) {
-            errors[errorKey] = "Проверьте дату и время"
-            return null
-        }
-        val now = LocalDateTime.now()
-        if (dt.isAfter(now.plusMinutes(5))) errors[errorKey] = "Дата и время не могут быть в будущем"
-        if (dt.isBefore(now.minusDays(45))) errors[errorKey] = "Дата события слишком старая"
-        return dt
+        val result = parseOperationalDateTime(date, time)
+        if (result.error != null) errors[errorKey] = result.error
+        return result.value
     }
 
     private fun validate(s: FormState): ValidationResult {
@@ -256,7 +333,11 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
 
             StageKind.DATETIME -> {
                 val dt = parseDateTime(s.primaryDate, s.primaryTime, "primary", errors)
-                if (dt != null && errors["primary"] == null) events += PendingEvent(s.stage.first, dt, dt.format(valueFmt), s.comment.trim())
+                val commentError = resumeCommentError(s.stage.id, s.comment)
+                if (commentError != null) errors["comment"] = commentError
+                if (dt != null && errors["primary"] == null && errors["comment"] == null) {
+                    events += PendingEvent(s.stage.first, dt, dt.format(valueFmt), s.comment.trim())
+                }
             }
 
             StageKind.STOP -> {

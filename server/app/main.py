@@ -404,6 +404,33 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
     return event
 
 
+@app.get("/api/mobile/permit")
+def mobile_permit_lookup(
+    permit_number: str = Query(min_length=3, max_length=80),
+    db: Session = Depends(get_db),
+):
+    normalized = permit_number.strip().upper()
+    record = db.scalar(select(PermitRecord).where(PermitRecord.permit_number == normalized))
+    if not record:
+        raise HTTPException(status_code=404, detail="Наряд-допуск не найден")
+    data = record_data(record)
+    fields = {
+        key: {
+            "field_value": str((data.get(key) or {}).get("field_value", "")),
+            "event_time": str((data.get(key) or {}).get("event_time", "")),
+            "comment": str((data.get(key) or {}).get("comment", "")),
+        }
+        for key in _dashboard_stage_keys()
+        if data.get(key)
+    }
+    return {
+        "permit_number": record.permit_number,
+        "worker_name": record.worker_name,
+        "updated_at": record.updated_at.isoformat(),
+        "fields": fields,
+    }
+
+
 @app.get("/api/mobile/events", response_model=list[EventOut])
 def mobile_history(device_id: str = Query(min_length=2), limit: int = Query(30, ge=1, le=100), db: Session = Depends(get_db)):
     events = list(db.scalars(

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 server/data/
+data/
 server/.env
 
 # Android

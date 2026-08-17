@@ -3,19 +3,26 @@ package ru.rpo.mobile.ui
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StagesTest {
     @Test
-    fun startWorkContainsTransferStartAndFinish() {
-        val stage = stages.firstOrNull { it.id == "START_WORK" }
-        assertNotNull(stage)
-        stage!!
-        assertEquals(StageKind.TRIPLE_DATETIME, stage.kind)
-        assertEquals("AV", stage.first.key)
-        assertEquals("AY", stage.second?.key)
-        assertEquals("BC", stage.third?.key)
+    fun transferAndActualWorkAreSeparateBlocks() {
+        val transfer = stages.firstOrNull { it.id == "TRANSFER_WORK" }
+        val actual = stages.firstOrNull { it.id == "ACTUAL_WORK" }
+
+        assertNotNull(transfer)
+        assertNotNull(actual)
+        assertEquals(StageKind.DATETIME, transfer!!.kind)
+        assertEquals("AV", transfer.first.key)
+        assertNull(transfer.second)
+
+        assertEquals(StageKind.RANGE_DATETIME, actual!!.kind)
+        assertEquals("AY", actual.first.key)
+        assertEquals("BC", actual.second?.key)
+        assertNull(actual.third)
     }
 
     @Test
@@ -27,6 +34,7 @@ class StagesTest {
         listOf("AX", "BD", "BF", "BG", "BH").forEach { removed ->
             assertFalse("$removed must not be visible in the app", removed in visibleKeys)
         }
+        assertFalse(stages.any { it.id == "START_WORK" })
         assertFalse(stages.any { it.id == "FINISH_WORK" })
     }
 
