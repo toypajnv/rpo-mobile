@@ -8,9 +8,34 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  apply-mobile-polish:
+    name: Apply pending mobile polish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply pending one-shot patch when present
+        run: |
+          if [ ! -f ops/apply_20260819_mobile_ui.py ]; then
+            echo 'No pending mobile patch.'
+            exit 0
+          fi
+          python ops/apply_20260819_mobile_ui.py
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Polish mobile date layout stage readiness and Russian input'
+          git push origin HEAD:develop
+
   backend-tests:
     name: Backend regression tests
     runs-on: ubuntu-latest
