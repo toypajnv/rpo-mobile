@@ -131,6 +131,15 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
     val currentFingerprint = stageFingerprint(s)
     val hasUnsavedChanges = currentFingerprint != baseline
 
+    LaunchedEffect(s.workerName) {
+        val cleaned = removeLatinLetters(s.workerName)
+        if (cleaned != s.workerName) vm.updateWorker(cleaned)
+    }
+    LaunchedEffect(s.permitNumber) {
+        val cleaned = removeLatinLetters(s.permitNumber)
+        if (cleaned != s.permitNumber) vm.updatePermit(cleaned)
+    }
+
     pendingStage?.let { target ->
         AlertDialog(
             onDismissRequest = { pendingStage = null },
@@ -328,15 +337,14 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
 
             StageKind.EXTENSION_DATE -> {
                 Text("Новая дата окончания работ", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                    Box(Modifier.weight(1f)) {
-                        DateField(s.extensionDate, vm::updateExtensionDate, s.errors["extension"])
-                    }
-                    OutlinedButton(onClick = vm::extensionTomorrow, modifier = Modifier.height(56.dp)) {
-                        Icon(Icons.Default.Event, null)
-                        Spacer(Modifier.width(5.dp))
-                        Text("Завтра")
-                    }
+                DateField(s.extensionDate, vm::updateExtensionDate, s.errors["extension"])
+                OutlinedButton(
+                    onClick = vm::extensionTomorrow,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Icon(Icons.Default.Event, null)
+                    Spacer(Modifier.width(5.dp))
+                    Text("Выбрать завтра", maxLines = 1)
                 }
                 Field("Комментарий (необязательно)", s.comment, vm::updateComment, "Причина или примечание", null, singleLine = false)
             }
@@ -365,7 +373,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 CheckLine(s.workerName.trim().length >= 3, "ФИО указано")
                 CheckLine(s.permitNumber.trim().length >= 3 && s.errors["permit"] == null, "Номер НД корректен")
-                CheckLine(s.errors.keys.none { it in setOf("primary", "secondary", "third", "extension", "stopReason", "comment") }, "Данные этапа заполнены")
+                CheckLine(stageDataReady(s), "Обязательные поля этапа заполнены")
                 CheckLine(s.stage.id in combinedSavedStageIds && !hasUnsavedChanges, "Текущий этап сохранён")
                 CheckLine(true, "При отсутствии сети данные сохранятся локально")
             }
@@ -383,6 +391,7 @@ private fun PermitField(
     error: String?,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var latinRejected by remember { mutableStateOf(false) }
     val suggestions = remember(value, memories) {
         val query = value.trim()
         if (query.isBlank()) memories.take(6)
@@ -394,14 +403,15 @@ private fun PermitField(
         Box {
             OutlinedTextField(
                 value = value,
-                onValueChange = {
-                    onValue(it)
+                onValueChange = { raw ->
+                    latinRejected = containsLatinLetters(raw)
+                    onValue(removeLatinLetters(raw))
                     expanded = true
                 },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Например: СН-038364") },
+                placeholder = { Text("Например: СН-038364", maxLines = 1) },
                 singleLine = true,
-                isError = error != null,
+                isError = error != null || latinRejected,
                 shape = RoundedCornerShape(11.dp),
                 trailingIcon = {
                     if (memories.isNotEmpty()) {
@@ -426,14 +436,21 @@ private fun PermitField(
                         },
                         leadingIcon = { Icon(Icons.Default.History, null) },
                         onClick = {
-                            onSelect(memory)
+                            onSelect(
+                                memory.copy(
+                                    permitNumber = removeLatinLetters(memory.permitNumber),
+                                    workerName = removeLatinLetters(memory.workerName),
+                                )
+                            )
+                            latinRejected = false
                             expanded = false
                         },
                     )
                 }
             }
         }
-        if (error != null) Text(error, color = Red, fontSize = 12.sp)
+        if (latinRejected) Text("Используйте русскую раскладку: латинские буквы не принимаются", color = Red, fontSize = 12.sp)
+        else if (error != null) Text(error, color = Red, fontSize = 12.sp)
         else if (memories.isNotEmpty()) Text("Введите часть номера или нажмите значок истории для автозаполнения.", color = Color.Gray, fontSize = 11.sp)
     }
 }
@@ -460,7 +477,13 @@ private fun DateField(value: String, onDate: (String) -> Unit, error: String?) {
             shape = RoundedCornerShape(11.dp),
             contentPadding = PaddingValues(horizontal = 12.dp),
         ) {
-            Text(value.ifBlank { "Выберите дату" }, Modifier.weight(1f), color = if (value.isBlank()) Color.Gray else Color.Unspecified)
+            Text(
+                value.ifBlank { "Выберите дату" },
+                Modifier.weight(1f),
+                color = if (value.isBlank()) Color.Gray else Color.Unspecified,
+                maxLines = 1,
+                softWrap = false,
+            )
             Icon(Icons.Default.Event, "Открыть календарь")
         }
         if (error != null) Text(error, color = Red, fontSize = 12.sp)
@@ -479,13 +502,17 @@ private fun DateTimeBlock(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        DateField(date, onDate, error)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-            Box(Modifier.weight(1f)) { DateField(date, onDate, error) }
-            Box(Modifier.weight(.72f)) { Field(null, time, onTime, "ЧЧ:ММ", null) }
-            OutlinedButton(onClick = onNow, modifier = Modifier.height(56.dp)) {
+            Box(Modifier.weight(1f)) { Field(null, time, onTime, "ЧЧ:ММ", null) }
+            OutlinedButton(
+                onClick = onNow,
+                modifier = Modifier.weight(1f).height(56.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp),
+            ) {
                 Icon(Icons.Default.Schedule, null)
-                Spacer(Modifier.width(4.dp))
-                Text("Сейчас")
+                Spacer(Modifier.width(5.dp))
+                Text("Сейчас", maxLines = 1, softWrap = false)
             }
         }
     }
@@ -500,20 +527,25 @@ private fun Field(
     error: String?,
     singleLine: Boolean = true,
 ) {
+    var latinRejected by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         if (label != null) Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         OutlinedTextField(
             value = value,
-            onValueChange = onValue,
+            onValueChange = { raw ->
+                latinRejected = containsLatinLetters(raw)
+                onValue(removeLatinLetters(raw))
+            },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text(placeholder) },
+            placeholder = { Text(placeholder, maxLines = if (singleLine) 1 else Int.MAX_VALUE) },
             singleLine = singleLine,
-            isError = error != null,
+            isError = error != null || latinRejected,
             shape = RoundedCornerShape(11.dp),
             minLines = if (singleLine) 1 else 3,
             maxLines = if (singleLine) 1 else 5,
         )
-        if (error != null) Text(error, color = Red, fontSize = 12.sp)
+        if (latinRejected) Text("Используйте русскую раскладку: латинские буквы не принимаются", color = Red, fontSize = 12.sp)
+        else if (error != null) Text(error, color = Red, fontSize = 12.sp)
     }
 }
 
@@ -652,7 +684,7 @@ private fun HelpScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Справка", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text(
-            "1. Укажите ФИО — приложение запомнит его на этом устройстве.\n\n" +
+            "1. Укажите ФИО русскими буквами — латиница в полях ввода не принимается. Приложение запомнит ФИО на этом устройстве.\n\n" +
                 "2. Введите номер НД. Ранее использованные номера появляются в подсказках и могут быть подставлены одним нажатием.\n\n" +
                 "3. Выберите этап. Передача объекта и фактическое начало/окончание работ теперь заполняются отдельными блоками.\n\n" +
                 "4. Заполните выбранный этап и обязательно нажмите «Сохранить этап». Сохранённые этапы отмечаются зелёной галочкой. При попытке уйти с изменённого, но не сохранённого этапа приложение покажет предупреждение.\n\n" +
