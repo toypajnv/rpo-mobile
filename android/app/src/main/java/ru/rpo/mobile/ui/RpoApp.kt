@@ -62,6 +62,7 @@ private fun stageFingerprint(s: FormState): String = listOf(
     s.extensionDate,
     s.stopReason,
     s.comment,
+    s.replacements.joinToString("~") { "${it.name}:${it.position}" },
 ).joinToString("|")
 
 @Composable
@@ -186,6 +187,33 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
                     )
                     Spacer(Modifier.width(9.dp))
                     Text(s.message, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        s.systemNotice?.let { notice ->
+            Surface(
+                color = if (notice.maintenance) Color(0xFFFFF1ED) else Color(0xFFEAF3FF),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                    Icon(
+                        if (notice.maintenance) Icons.Default.Warning else Icons.Default.CloudDone,
+                        null,
+                        tint = if (notice.maintenance) Red else Blue,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Column {
+                        Text(notice.message, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        if (notice.update_available) {
+                            Text(
+                                "Доступно обновление ${notice.latest_app_version}. Текущая версия продолжит передавать данные.",
+                                color = Blue,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -347,6 +375,40 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
                     Text("Выбрать завтра", maxLines = 1)
                 }
                 Field("Комментарий (необязательно)", s.comment, vm::updateComment, "Причина или примечание", null, singleLine = false)
+            }
+
+            StageKind.REPLACEMENTS -> {
+                Surface(color = Color(0xFFF2F6FC), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Замена исполнителей работ", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Раздел необязательный. Заполняйте его только при фактической замене исполнителей.",
+                            color = Color.Gray,
+                            fontSize = 12.sp,
+                        )
+                        s.replacements.forEachIndexed { index, item ->
+                            ElevatedCard(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Исполнитель ${index + 1}", fontWeight = FontWeight.SemiBold)
+                                        Spacer(Modifier.weight(1f))
+                                        if (s.replacements.size > 1) {
+                                            TextButton(onClick = { vm.removeReplacement(index) }) { Text("Удалить", color = Red) }
+                                        }
+                                    }
+                                    Field("ФИО", item.name, { vm.updateReplacementName(index, it) }, "Например: Петров П.П.", null)
+                                    Field("Должность / профессия", item.position, { vm.updateReplacementPosition(index, it) }, "Например: электромонтёр", null)
+                                }
+                            }
+                        }
+                        OutlinedButton(onClick = vm::addReplacement, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Add, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Добавить ещё исполнителя")
+                        }
+                        s.errors["replacements"]?.let { Text(it, color = Red, fontSize = 12.sp) }
+                    }
+                }
             }
         }
 
@@ -607,7 +669,11 @@ private fun StagePicker(
                                 Text(stage.title, fontWeight = FontWeight.SemiBold)
                                 val eventTitles = listOfNotNull(stage.first.title, stage.second?.title, stage.third?.title)
                                 Text(
-                                    if (saved) "Сохранён" else eventTitles.joinToString(" • "),
+                                    when {
+                                        saved -> "Сохранён"
+                                        stage.optional -> "Необязательно"
+                                        else -> eventTitles.joinToString(" • ")
+                                    },
                                     fontSize = 11.sp,
                                     color = if (saved) Green else Color.Gray,
                                 )
@@ -628,7 +694,7 @@ private fun StagePicker(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.CheckCircle, null, tint = Green, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Сохранено этапов: $savedCount из ${stages.size}", fontSize = 12.sp, color = Color.Gray)
+            Text("Сохранено обязательных этапов: $savedCount из $requiredStageCount", fontSize = 12.sp, color = Color.Gray)
         }
     }
 }
@@ -690,7 +756,9 @@ private fun HelpScreen() {
                 "4. Заполните выбранный этап и обязательно нажмите «Сохранить этап». Сохранённые этапы отмечаются зелёной галочкой. При попытке уйти с изменённого, но не сохранённого этапа приложение покажет предупреждение.\n\n" +
                 "5. Дату выбирайте из календаря, время вводите вручную или кнопкой «Сейчас». Для остановки обязательна причина, а для возобновления — комментарий. Для продления РПО укажите новую дату окончания.\n\n" +
                 "6. После нажатия «Сохранить этап» данные сначала сохраняются на телефоне. Если интернета нет, они останутся в очереди и отправятся автоматически после появления сети.\n\n" +
-                "7. Для синхронизации подходит любая интернет-сеть, включая медленное мобильное соединение 2G. Передаваемые пакеты данных небольшие."
+                "7. Раздел «Замена исполнителей работ» необязательный. При замене укажите ФИО и должность / профессию каждого нового исполнителя.\n\n" +
+                "8. Приложение получает от сервера сообщение о состоянии системы и доступной версии. Старые версии приложения остаются совместимыми с сервером.\n\n" +
+                "9. Для синхронизации подходит любая интернет-сеть, включая медленное мобильное соединение 2G. Передаваемые пакеты данных небольшие."
         )
     }
 }

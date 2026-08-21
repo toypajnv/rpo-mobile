@@ -21,8 +21,8 @@ android {
         applicationId = "ru.rpo.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.1.4"
+        versionCode = 8
+        versionName = "1.1.5"
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
     }
 

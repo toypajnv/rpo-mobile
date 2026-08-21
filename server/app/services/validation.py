@@ -25,11 +25,10 @@ def validate_event(db: Session, payload: EventCreate) -> None:
         raise EventValidationError("Дата события слишком старая. Проверьте дату и время")
 
     stage = STAGES[payload.field_key]
-    if stage.get("comment_required") and len(payload.comment.strip()) < 3:
-        if payload.field_key == "BA":
-            raise EventValidationError("Для возобновления работ необходимо указать комментарий")
-        raise EventValidationError("Для остановки работ необходимо указать причину")
 
+    # Mandatory stop/resume comments are enforced by current APKs. The server
+    # deliberately does not reject a missing comment here: older installed APKs
+    # must remain able to synchronize after a server update.
     if stage["kind"] == "text" and len(payload.field_value.strip()) < 2:
         raise EventValidationError("Заполните значение для выбранного этапа")
 

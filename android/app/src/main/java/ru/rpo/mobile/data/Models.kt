@@ -40,3 +40,16 @@ data class PermitSnapshot(
     val updated_at: String,
     val fields: Map<String, PermitFieldSnapshot> = emptyMap(),
 )
+
+data class MobileConfig(
+    val status: String = "ok",
+    val server_version: String = "",
+    val latest_app_version: String = "",
+    val minimum_supported_version: String = "",
+    val update_available: Boolean = false,
+    val update_required: Boolean = false,
+    val maintenance: Boolean = false,
+    val message: String = "",
+    val apk_url: String = "",
+    val checked_at: String = "",
+)
