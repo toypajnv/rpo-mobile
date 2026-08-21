@@ -15,4 +15,7 @@ interface RpoApi {
 
     @GET("api/mobile/permit")
     suspend fun permit(@Query("permit_number") permitNumber: String): Response<PermitSnapshot>
+
+    @GET("api/mobile/config")
+    suspend fun config(@Query("app_version") appVersion: String): Response<MobileConfig>
 }

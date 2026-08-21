@@ -1,6 +1,6 @@
 package ru.rpo.mobile.ui
 
-enum class StageKind { RANGE_DATETIME, TRIPLE_DATETIME, DATETIME, STOP, EXTENSION_DATE }
+enum class StageKind { RANGE_DATETIME, TRIPLE_DATETIME, DATETIME, STOP, EXTENSION_DATE, REPLACEMENTS }
 
 data class StageEvent(val key: String, val title: String)
 
@@ -11,6 +11,7 @@ data class Stage(
     val first: StageEvent,
     val second: StageEvent? = null,
     val third: StageEvent? = null,
+    val optional: Boolean = false,
 )
 
 val stages = listOf(
@@ -52,9 +53,19 @@ val stages = listOf(
         kind = StageKind.EXTENSION_DATE,
         first = StageEvent("BE", "Продление РПО"),
     ),
+    Stage(
+        id = "REPLACEMENTS",
+        title = "Замена исполнителей работ",
+        kind = StageKind.REPLACEMENTS,
+        first = StageEvent("RI", "Замена исполнителей работ"),
+        optional = true,
+    ),
 )
 
-fun savedStageCount(savedStageIds: Set<String>): Int = stages.count { it.id in savedStageIds }
+val requiredStages: List<Stage> = stages.filterNot { it.optional }
+val requiredStageCount: Int = requiredStages.size
+
+fun savedStageCount(savedStageIds: Set<String>): Int = requiredStages.count { it.id in savedStageIds }
 
 fun savedStageIdsForFieldKeys(fieldKeys: Set<String>): Set<String> = stages
     .filter { stage -> listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key).all { it in fieldKeys } }

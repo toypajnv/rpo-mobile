@@ -12,10 +12,29 @@ internal val rpoDateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPatte
 private val latinLetterRegex = Regex("[A-Za-z]")
 
 data class OperationalDateTimeResult(val value: LocalDateTime?, val error: String?)
+data class ReplacementEntry(val name: String = "", val position: String = "")
 
 fun containsLatinLetters(value: String): Boolean = latinLetterRegex.containsMatchIn(value)
 
 fun removeLatinLetters(value: String): String = value.filterNot { it in 'A'..'Z' || it in 'a'..'z' }
+
+fun encodeReplacements(entries: List<ReplacementEntry>): String = entries
+    .map { ReplacementEntry(it.name.trim(), it.position.trim()) }
+    .filter { it.name.isNotBlank() || it.position.isNotBlank() }
+    .joinToString("\n") { "${it.name}\t${it.position}" }
+
+fun decodeReplacements(value: String): List<ReplacementEntry> {
+    val parsed = value.lines().mapNotNull { line ->
+        val parts = line.split('\t', limit = 2)
+        if (parts.size == 2) ReplacementEntry(parts[0].trim(), parts[1].trim()) else null
+    }.filter { it.name.isNotBlank() || it.position.isNotBlank() }
+    return parsed.ifEmpty { listOf(ReplacementEntry()) }
+}
+
+fun replacementsReady(entries: List<ReplacementEntry>): Boolean {
+    val used = entries.filter { it.name.isNotBlank() || it.position.isNotBlank() }
+    return used.isNotEmpty() && used.all { it.name.trim().length >= 3 && it.position.trim().length >= 2 }
+}
 
 fun parseOperationalDateTime(
     date: String,
@@ -68,4 +87,6 @@ fun stageDataReady(state: FormState): Boolean = when (state.stage.kind) {
 
     StageKind.EXTENSION_DATE ->
         runCatching { LocalDate.parse(state.extensionDate, rpoDateFormatter) }.isSuccess
+
+    StageKind.REPLACEMENTS -> replacementsReady(state.replacements)
 }

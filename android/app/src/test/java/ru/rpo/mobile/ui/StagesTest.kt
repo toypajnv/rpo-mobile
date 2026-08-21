@@ -44,6 +44,6 @@ class StagesTest {
             listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key)
         }
         assertEquals(keys.size, keys.toSet().size)
-        assertTrue(keys.containsAll(listOf("AT", "AU", "AV", "AY", "BC", "AZ", "BA", "BE")))
+        assertTrue(keys.containsAll(listOf("AT", "AU", "AV", "AY", "BC", "AZ", "BA", "BE", "RI")))
     }
 }

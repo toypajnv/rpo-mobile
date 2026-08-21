@@ -9,6 +9,7 @@ STAGES = {
     "BC": {"label": "Фактическое окончание работ", "order": 80, "kind": "datetime", "after": "AY"},
     "BD": {"label": "Выполнение мероприятий по завершению", "order": 90, "kind": "datetime", "after": "BC"},
     "BE": {"label": "Продление РПО", "order": 95, "kind": "text"},
+    "RI": {"label": "Замена исполнителей работ", "order": 97, "kind": "text", "optional": True},
     "BF": {"label": "Выполнение мероприятий по передаче объекта", "order": 100, "kind": "datetime", "after": "BD"},
     "BG": {"label": "Закрытие ЭНД", "order": 105, "kind": "text"},
     "BH": {"label": "Передача площадки эксплуатирующей организации", "order": 110, "kind": "datetime", "after": "BF"},

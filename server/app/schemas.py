@@ -3,18 +3,21 @@ from pydantic import BaseModel, Field, field_validator
 import re
 
 
-ALLOWED_FIELDS = {"AT", "AU", "AV", "AX", "AY", "AZ", "BA", "BC", "BD", "BE", "BF", "BG", "BH"}
+# Legacy fields stay accepted permanently so already installed APKs keep working.
+ALLOWED_FIELDS = {"AT", "AU", "AV", "AX", "AY", "AZ", "BA", "BC", "BD", "BE", "BF", "BG", "BH", "RI"}
 
 
 class EventCreate(BaseModel):
-    client_event_id: str = Field(min_length=8, max_length=64)
-    device_id: str = Field(min_length=2, max_length=160)
+    # The first APKs always sent these values, but they are optional on the server
+    # so an older/minimal client is not rejected after future server upgrades.
+    client_event_id: str | None = Field(default=None, min_length=8, max_length=64)
+    device_id: str = Field(default="legacy-device", min_length=2, max_length=160)
     worker_name: str = Field(min_length=3, max_length=180)
     permit_number: str = Field(min_length=3, max_length=80)
     field_key: str
-    stage_label: str = Field(min_length=2, max_length=255)
+    stage_label: str = Field(default="", max_length=255)
     event_time: datetime
-    field_value: str = Field(min_length=1, max_length=1000)
+    field_value: str = Field(min_length=1, max_length=4000)
     comment: str = Field(default="", max_length=1000)
 
     @field_validator("worker_name", "permit_number", "field_key", "field_value")

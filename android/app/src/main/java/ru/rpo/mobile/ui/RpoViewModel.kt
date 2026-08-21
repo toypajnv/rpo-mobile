@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
+import ru.rpo.mobile.BuildConfig
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 import ru.rpo.mobile.data.EventRequest
 import ru.rpo.mobile.data.EventResponse
 import ru.rpo.mobile.data.PermitSnapshot
+import ru.rpo.mobile.data.MobileConfig
 import ru.rpo.mobile.data.NetworkState
 import ru.rpo.mobile.data.PendingEventStore
 import ru.rpo.mobile.data.PendingSyncScheduler
@@ -53,6 +55,8 @@ data class FormState(
     val extensionDate: String = "",
     val stopReason: String = "",
     val comment: String = "",
+    val replacements: List<ReplacementEntry> = listOf(ReplacementEntry()),
+    val systemNotice: MobileConfig? = null,
     val errors: Map<String, String> = emptyMap(),
     val sending: Boolean = false,
     val message: String? = null,
@@ -103,15 +107,21 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            viewModelScope.launch { syncPending(showMessage = false) }
+            viewModelScope.launch {
+                checkSystemStatus()
+                syncPending(showMessage = false)
+            }
         }
     }
 
     init {
         PendingSyncScheduler.schedule(app)
         runCatching { connectivityManager.registerDefaultNetworkCallback(networkCallback) }
-        if (NetworkState.isConnected(app) && queueStore.pendingCount() > 0) {
-            viewModelScope.launch { syncPending(showMessage = false) }
+        if (NetworkState.isConnected(app)) {
+            viewModelScope.launch {
+                checkSystemStatus()
+                if (queueStore.pendingCount() > 0) syncPending(showMessage = false)
+            }
         }
     }
 
@@ -152,6 +162,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         extensionDate = "",
         stopReason = "",
         comment = "",
+        replacements = listOf(ReplacementEntry()),
         errors = base.errors.filterKeys { it == "worker" || it == "permit" },
         message = null,
     )
@@ -181,6 +192,9 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             extensionDate = if (stage.kind == StageKind.EXTENSION_DATE) snapshot.fields[stage.first.key]?.field_value.orEmpty() else "",
             stopReason = if (stage.kind == StageKind.STOP) snapshot.fields[stage.first.key]?.comment.orEmpty() else "",
             comment = if (stage.kind == StageKind.STOP) "" else commonComment,
+            replacements = if (stage.kind == StageKind.REPLACEMENTS) {
+                decodeReplacements(snapshot.fields[stage.first.key]?.field_value.orEmpty())
+            } else listOf(ReplacementEntry()),
         )
     }
 
@@ -272,6 +286,32 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     fun updateStopReason(v: String) { _state.value = _state.value.copy(stopReason = v.take(500), message = null) }
     fun updateComment(v: String) { _state.value = _state.value.copy(comment = v.take(500), message = null) }
 
+    fun updateReplacementName(index: Int, value: String) {
+        val updated = _state.value.replacements.toMutableList()
+        if (index !in updated.indices) return
+        updated[index] = updated[index].copy(name = value.take(180))
+        _state.value = _state.value.copy(replacements = updated, message = null)
+    }
+
+    fun updateReplacementPosition(index: Int, value: String) {
+        val updated = _state.value.replacements.toMutableList()
+        if (index !in updated.indices) return
+        updated[index] = updated[index].copy(position = value.take(180))
+        _state.value = _state.value.copy(replacements = updated, message = null)
+    }
+
+    fun addReplacement() {
+        if (_state.value.replacements.size >= 12) return
+        _state.value = _state.value.copy(replacements = _state.value.replacements + ReplacementEntry(), message = null)
+    }
+
+    fun removeReplacement(index: Int) {
+        val current = _state.value.replacements
+        if (index !in current.indices) return
+        val updated = current.filterIndexed { i, _ -> i != index }.ifEmpty { listOf(ReplacementEntry()) }
+        _state.value = _state.value.copy(replacements = updated, message = null)
+    }
+
     fun nowPrimary() {
         val n = LocalDateTime.now()
         _state.value = _state.value.copy(primaryDate = n.toLocalDate().format(dateFmt), primaryTime = n.toLocalTime().format(timeFmt), message = null)
@@ -360,6 +400,19 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                     events += PendingEvent(s.stage.first, LocalDateTime.now(), extension.format(dateFmt), s.comment.trim())
                 }
             }
+
+            StageKind.REPLACEMENTS -> {
+                if (!replacementsReady(s.replacements)) {
+                    errors["replacements"] = "Для каждой замены укажите ФИО и должность / профессию"
+                } else {
+                    events += PendingEvent(
+                        s.stage.first,
+                        LocalDateTime.now(),
+                        encodeReplacements(s.replacements),
+                        "",
+                    )
+                }
+            }
         }
         return ValidationResult(errors, events)
     }
@@ -442,6 +495,18 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch { syncPending(showMessage = true) }
         }
         return true
+    }
+
+    private suspend fun checkSystemStatus() {
+        if (!NetworkState.isConnected(application)) return
+        try {
+            val response = ru.rpo.mobile.data.ApiFactory.api.config(BuildConfig.VERSION_NAME)
+            if (response.isSuccessful) {
+                _state.value = _state.value.copy(systemNotice = response.body())
+            }
+        } catch (_: Exception) {
+            // Feedback is informational and must never block field work.
+        }
     }
 
     fun loadHistory() {

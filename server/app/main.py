@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated
 from contextlib import asynccontextmanager
 import json
+import hashlib
 
 from fastapi import FastAPI, Depends, Form, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -25,7 +26,13 @@ from .services.mailer import send_export
 from .stages import STAGES
 
 BASE_DIR = Path(__file__).resolve().parent
-DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
+REQUIRED_DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
+DASHBOARD_STAGE_KEYS = REQUIRED_DASHBOARD_STAGE_KEYS + ("RI",)
+LATEST_MOBILE_VERSION = "1.1.5"
+MIN_SUPPORTED_MOBILE_VERSION = "1.0.1"
+MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v1.1.5-test/rpo-mobile-1.1.5.apk"
+DEFAULT_OPERATOR_USERNAME = "Operator"
+DEFAULT_OPERATOR_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$hBSN4f5Hetyo+a4aOvCP3A$7bYB1iB2/8/sS0w1AYTNrdAg3QyVP7KdhTOP2PHCNys"
 settings.ensure_dirs()
 
 
@@ -33,11 +40,12 @@ settings.ensure_dirs()
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
     ensure_admin()
+    ensure_default_operator()
     ensure_permit_records()
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.3.1", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.4.0", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", https_only=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -59,6 +67,23 @@ def ensure_admin() -> None:
         if not user:
             db.add(Operator(username=settings.admin_username, password_hash=hash_password(settings.admin_password)))
             db.commit()
+
+
+def ensure_default_operator() -> None:
+    """Create the shared Operator account without storing its plain password."""
+    with SessionLocal() as db:
+        user = db.scalar(select(Operator).where(Operator.username == DEFAULT_OPERATOR_USERNAME))
+        if not user:
+            db.add(Operator(
+                username=DEFAULT_OPERATOR_USERNAME,
+                password_hash=DEFAULT_OPERATOR_PASSWORD_HASH,
+                is_active=True,
+            ))
+            db.commit()
+
+
+def is_admin(operator: Operator | None) -> bool:
+    return bool(operator and operator.username == settings.admin_username)
 
 
 def _safe_data(value: str | None) -> dict:
@@ -136,6 +161,10 @@ def _dashboard_stage_keys() -> list[str]:
     return [key for key in DASHBOARD_STAGE_KEYS if key in STAGES]
 
 
+def _required_dashboard_stage_keys() -> list[str]:
+    return [key for key in REQUIRED_DASHBOARD_STAGE_KEYS if key in STAGES]
+
+
 def _field_dt(data: dict, key: str) -> datetime | None:
     raw = str((data.get(key) or {}).get("event_time", "")).strip()
     if not raw:
@@ -186,8 +215,9 @@ def _record_summary(record: PermitRecord) -> tuple[str, str]:
 def _work_view(record: PermitRecord) -> dict:
     data = record_data(record)
     visible_keys = _dashboard_stage_keys()
-    filled = sum(1 for key in visible_keys if _has_stage(data, key))
-    total = len(visible_keys) or 1
+    required_keys = _required_dashboard_stage_keys()
+    filled = sum(1 for key in required_keys if _has_stage(data, key))
+    total = len(required_keys) or 1
     summary, comments = _record_summary(record)
     status, status_class = _record_state(record)
     stage_items = []
@@ -368,9 +398,25 @@ def logout(request: Request):
     return RedirectResponse("/login", status_code=303)
 
 
+def _effective_client_event_id(payload: EventCreate) -> str:
+    if payload.client_event_id:
+        return payload.client_event_id
+    raw = "|".join([
+        payload.device_id,
+        payload.worker_name,
+        payload.permit_number,
+        payload.field_key,
+        payload.event_time.isoformat(),
+        payload.field_value,
+        payload.comment,
+    ])
+    return "legacy-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:48]
+
+
 @app.post("/api/mobile/events", response_model=EventOut, status_code=201)
 def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
-    existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == payload.client_event_id))
+    client_event_id = _effective_client_event_id(payload)
+    existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == client_event_id))
     if existing:
         return existing
     try:
@@ -379,12 +425,12 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail=str(e))
 
     event = MobileEvent(
-        client_event_id=payload.client_event_id,
+        client_event_id=client_event_id,
         device_id=payload.device_id,
         worker_name=payload.worker_name,
         permit_number=payload.permit_number,
         field_key=payload.field_key,
-        stage_label=payload.stage_label,
+        stage_label=payload.stage_label.strip() or STAGES[payload.field_key]["label"],
         event_time=dt_utc(payload.event_time),
         field_value=payload.field_value,
         comment=payload.comment,
@@ -402,6 +448,36 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
         raise
     db.refresh(event)
     return event
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    parts = []
+    for raw in (value or "").split(".")[:3]:
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        parts.append(int(digits or 0))
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+@app.get("/api/mobile/config")
+def mobile_config(app_version: str = Query(default="", max_length=32)):
+    update_available = bool(app_version) and _version_tuple(app_version) < _version_tuple(LATEST_MOBILE_VERSION)
+    message = "Связь с сервером установлена. Система РПО работает штатно."
+    if update_available:
+        message += f" Доступна версия приложения {LATEST_MOBILE_VERSION}."
+    return {
+        "status": "ok",
+        "server_version": app.version,
+        "latest_app_version": LATEST_MOBILE_VERSION,
+        "minimum_supported_version": MIN_SUPPORTED_MOBILE_VERSION,
+        "update_available": update_available,
+        "update_required": False,
+        "maintenance": False,
+        "message": message,
+        "apk_url": MOBILE_APK_URL,
+        "checked_at": utcnow().isoformat(),
+    }
 
 
 @app.get("/api/mobile/permit")
@@ -513,7 +589,9 @@ def dashboard_context(db: Session):
         "mail_ready": bool(settings.resend_api_key) if settings.mail_mode.lower() == "resend" else bool(settings.smtp_host) if settings.mail_mode.lower() == "smtp" else True,
         "database": "PostgreSQL" if settings.database_url.startswith("postgresql") else "SQLite",
         "app_version": app.version,
+        "mobile_version": LATEST_MOBILE_VERSION,
     }
+    users = list(db.scalars(select(Operator).order_by(Operator.username.asc())))
     return dict(
         received_today=received_today,
         pending=pending,
@@ -524,12 +602,17 @@ def dashboard_context(db: Session):
         exports=exports,
         analytics=analytics,
         settings_view=settings_view,
+        users=users,
     )
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, operator: Operator = Depends(current_operator), db: Session = Depends(get_db)):
-    return templates.TemplateResponse(request=request, name="dashboard.html", context={"operator": operator, **dashboard_context(db)})
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard.html",
+        context={"operator": operator, "is_admin": is_admin(operator), **dashboard_context(db)},
+    )
 
 
 @app.get("/api/operator/events")
@@ -557,6 +640,7 @@ def operator_events(
             "stage_count": item["stage_count"],
             "stage_total": item["stage_total"],
             "stage_items": item["stage_items"],
+            "can_delete": is_admin(operator),
         })
     return result
 
@@ -586,6 +670,46 @@ def operator_transmissions(
         }
         for event in events
     ]
+
+
+@app.delete("/api/operator/permits/{record_id}")
+def delete_permit_record(
+    record_id: int,
+    operator: Operator = Depends(current_operator),
+    db: Session = Depends(get_db),
+):
+    if not is_admin(operator):
+        raise HTTPException(status_code=403, detail="Удаление доступно только администратору")
+    record = db.get(PermitRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Наряд-допуск не найден")
+    permit_number = record.permit_number
+    raw_events = list(db.scalars(select(MobileEvent).where(MobileEvent.permit_number == permit_number)))
+    for event in raw_events:
+        db.delete(event)
+    db.delete(record)
+    db.commit()
+    return {"status": "deleted", "permit_number": permit_number, "events_deleted": len(raw_events)}
+
+
+@app.post("/users/{operator_id}/password")
+def reset_operator_password(
+    operator_id: int,
+    password: Annotated[str, Form()],
+    operator: Operator = Depends(current_operator),
+    db: Session = Depends(get_db),
+):
+    if not is_admin(operator):
+        raise HTTPException(status_code=403, detail="Управление пользователями доступно только администратору")
+    target = db.get(Operator, operator_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if len(password) < 10:
+        raise HTTPException(status_code=400, detail="Пароль должен содержать не менее 10 символов")
+    target.password_hash = hash_password(password)
+    target.is_active = True
+    db.commit()
+    return RedirectResponse("/dashboard?user=password-updated#users", status_code=303)
 
 
 @app.get("/api/operator/export-preview")

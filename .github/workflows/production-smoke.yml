@@ -36,7 +36,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify mobile permit prefill API is deployed
+      - name: Verify mobile API contract is deployed
         shell: bash
         run: |
           set -euo pipefail
@@ -47,8 +47,26 @@ jobs:
 
           spec = json.loads(Path('/tmp/rpo-openapi.json').read_text())
           paths = spec.get('paths', {})
-          required = '/api/mobile/permit'
-          if required not in paths:
-              raise SystemExit(f'Missing deployed API route: {required}')
-          print(f'Deployed API route confirmed: {required}')
+          required = ['/api/mobile/permit', '/api/mobile/config']
+          for route in required:
+              if route not in paths:
+                  raise SystemExit(f'Missing deployed API route: {route}')
+              print(f'Deployed API route confirmed: {route}')
+          PY
+
+      - name: Verify old APK compatibility status
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 10 'https://rpo-mng.ru/api/mobile/config?app_version=1.0.1' -o /tmp/mobile-config.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
+          assert cfg['status']=='ok'
+          assert cfg['latest_app_version']=='1.1.5'
+          assert cfg['update_required'] is False
+          assert cfg['update_available'] is True
+          print('Old APK remains supported; latest mobile version:', cfg['latest_app_version'])
           PY

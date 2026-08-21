@@ -45,12 +45,16 @@ async function refreshWorks(){
     const rows=await r.json();
     const body=document.querySelector('#works-body');
     if(!body)return;
+    const canDelete=body.dataset.canDelete==='true';
     const openPermits=new Set(
       Array.from(body.querySelectorAll('details.stage-details[open]'))
         .map(details=>details.dataset.permit)
         .filter(Boolean)
     );
-    body.innerHTML=rows.map(e=>`<tr><td>${esc(fmt(e.updated_at))}</td><td><b>${esc(e.permit_number)}</b></td><td><b>${esc(e.worker_name)}</b></td><td><span class="work-state ${esc(e.status_class)}">${esc(e.status)}</span></td><td><div class="progress"><span style="width:${Number(e.progress)||0}%"></span></div><small>${Number(e.stage_count)||0} из ${Number(e.stage_total)||0}</small></td><td class="works-stage-cell">${stageDetails(e,openPermits.has(e.permit_number))}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td></tr>`).join('');
+    body.innerHTML=rows.map(e=>{
+      const action=(canDelete&&e.can_delete)?`<button type="button" class="danger-button" data-delete-permit="${Number(e.id)}" data-permit-number="${esc(e.permit_number)}">Удалить</button>`:'—';
+      return `<tr><td>${esc(fmt(e.updated_at))}</td><td><b>${esc(e.permit_number)}</b></td><td><b>${esc(e.worker_name)}</b></td><td><span class="work-state ${esc(e.status_class)}">${esc(e.status)}</span></td><td><div class="progress"><span style="width:${Number(e.progress)||0}%"></span></div><small>${Number(e.stage_count)||0} из ${Number(e.stage_total)||0}</small></td><td class="works-stage-cell">${stageDetails(e,openPermits.has(e.permit_number))}</td><td><span class="badge ${e.exported?'done':'pending'}">${e.exported?'Выгружено':'Не выгружено'}</span></td><td>${action}</td></tr>`;
+    }).join('');
   }catch(e){console.error('refreshWorks',e)}
 }
 
@@ -66,6 +70,21 @@ async function refreshTransmissions(){
 refreshWorks();
 refreshTransmissions();
 setInterval(()=>{refreshWorks();refreshTransmissions()},5000);
+
+document.addEventListener('click',async e=>{
+  const button=e.target.closest('[data-delete-permit]');
+  if(!button)return;
+  const id=Number(button.dataset.deletePermit);
+  const permit=button.dataset.permitNumber||'';
+  if(!id||!confirm(`Удалить НД ${permit}? Будут удалены сам НД и все полученные с телефонов события по нему. История уже выполненных выгрузок сохранится.`))return;
+  button.disabled=true;
+  try{
+    const r=await fetch(`/api/operator/permits/${id}`,{method:'DELETE',credentials:'same-origin',headers:{'Accept':'application/json'}});
+    let data={}; try{data=await r.json()}catch(_){}
+    if(!r.ok)throw new Error(data.detail||'Не удалось удалить запись');
+    await Promise.all([refreshWorks(),refreshTransmissions()]);
+  }catch(err){alert(err.message||'Ошибка удаления');button.disabled=false;}
+});
 
 const pad=n=>String(n).padStart(2,'0');
 function localInput(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`}
