@@ -21,12 +21,11 @@ fun removeLatinLetters(value: String): String = value.filterNot { it in 'A'..'Z'
 fun encodeReplacements(entries: List<ReplacementEntry>): String = entries
     .map { ReplacementEntry(it.name.trim(), it.position.trim()) }
     .filter { it.name.isNotBlank() || it.position.isNotBlank() }
-    .joinToString("
-") { "${it.name}	${it.position}" }
+    .joinToString("\n") { "${it.name}\t${it.position}" }
 
 fun decodeReplacements(value: String): List<ReplacementEntry> {
     val parsed = value.lines().mapNotNull { line ->
-        val parts = line.split('	', limit = 2)
+        val parts = line.split('\t', limit = 2)
         if (parts.size == 2) ReplacementEntry(parts[0].trim(), parts[1].trim()) else null
     }.filter { it.name.isNotBlank() || it.position.isNotBlank() }
     return parsed.ifEmpty { listOf(ReplacementEntry()) }
