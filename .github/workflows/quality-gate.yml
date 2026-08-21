@@ -27,6 +27,9 @@ jobs:
         run: |
           set -euo pipefail
           python ops/apply_20260821_upgrade.py
+          # GitHub Actions tokens cannot push workflow-file changes. Keep those
+          # files exactly as they are in develop; they are updated separately.
+          git checkout origin/develop -- .github/workflows/quality-gate.yml .github/workflows/production-smoke.yml
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
