@@ -8,35 +8,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-upgrade:
-    name: Apply RPO 1.1.5 upgrade
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: develop
-          fetch-depth: 0
-
-      - name: Apply one-shot upgrade patch
-        run: |
-          set -euo pipefail
-          python ops/apply_20260821_upgrade.py
-          # GitHub Actions tokens cannot push workflow-file changes. Keep those
-          # files exactly as they are in develop; they are updated separately.
-          git checkout origin/develop -- .github/workflows/quality-gate.yml .github/workflows/production-smoke.yml
-          git diff --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'RPO 1.1.5: compatibility replacements operator deletion and feedback'
-          git push origin HEAD:develop
-
   backend-tests:
     name: Backend regression tests
     runs-on: ubuntu-latest
