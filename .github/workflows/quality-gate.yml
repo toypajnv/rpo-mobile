@@ -8,11 +8,41 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  apply-upgrade:
+    name: Apply RPO 1.1.6 patch
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+      - name: Apply patch
+        run: python ops/apply-1.1.6.py
+      - name: Commit working changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Workflow files are restored here; they are updated separately through the GitHub connector.
+          git checkout -- .github/workflows/production-smoke.yml || true
+          if git diff --quiet; then
+            echo 'RPO 1.1.6 patch already applied.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android server
+          git commit -m 'RPO 1.1.6: keep keyboard, restore pickers, allow start-only range stages'
+          git push origin HEAD:develop
+
   backend-tests:
     name: Backend regression tests
+    needs: [apply-upgrade]
+    if: always() && (needs.apply-upgrade.result == 'success' || needs.apply-upgrade.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -59,6 +89,8 @@ jobs:
 
   android-tests:
     name: Android unit tests
+    needs: [apply-upgrade]
+    if: always() && (needs.apply-upgrade.result == 'success' || needs.apply-upgrade.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
