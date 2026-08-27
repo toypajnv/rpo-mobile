@@ -28,9 +28,9 @@ from .stages import STAGES
 BASE_DIR = Path(__file__).resolve().parent
 REQUIRED_DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
 DASHBOARD_STAGE_KEYS = REQUIRED_DASHBOARD_STAGE_KEYS + ("RI",)
-LATEST_MOBILE_VERSION = "1.1.5"
+LATEST_MOBILE_VERSION = "1.1.6"
 MIN_SUPPORTED_MOBILE_VERSION = "1.0.1"
-MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v1.1.5-test/rpo-mobile-1.1.5.apk"
+MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v1.1.6-test/rpo-mobile-1.1.6.apk"
 DEFAULT_OPERATOR_USERNAME = "Operator"
 DEFAULT_OPERATOR_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$hBSN4f5Hetyo+a4aOvCP3A$7bYB1iB2/8/sS0w1AYTNrdAg3QyVP7KdhTOP2PHCNys"
 settings.ensure_dirs()
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.4.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.4.1", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", https_only=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")

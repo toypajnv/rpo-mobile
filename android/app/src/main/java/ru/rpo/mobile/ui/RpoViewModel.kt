@@ -350,10 +350,21 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         when (s.stage.kind) {
             StageKind.RANGE_DATETIME -> {
                 val start = parseDateTime(s.primaryDate, s.primaryTime, "primary", errors)
-                val end = parseDateTime(s.secondaryDate, s.secondaryTime, "secondary", errors)
+                val endDateSet = s.secondaryDate.isNotBlank()
+                val endTimeSet = s.secondaryTime.isNotBlank()
+                val end = when {
+                    !endDateSet && !endTimeSet -> null
+                    endDateSet && endTimeSet -> parseDateTime(s.secondaryDate, s.secondaryTime, "secondary", errors)
+                    else -> {
+                        errors["secondary"] = "Укажите дату и время окончания полностью или оставьте оба поля пустыми"
+                        null
+                    }
+                }
                 if (start != null && end != null && end.isBefore(start)) errors["secondary"] = "Окончание не может быть раньше начала"
-                if (start != null && end != null && !end.isBefore(start) && errors["primary"] == null && errors["secondary"] == null) {
+                if (start != null && errors["primary"] == null) {
                     events += PendingEvent(s.stage.first, start, start.format(valueFmt), s.comment.trim())
+                }
+                if (end != null && start != null && !end.isBefore(start) && errors["secondary"] == null) {
                     events += PendingEvent(requireNotNull(s.stage.second), end, end.format(valueFmt), s.comment.trim())
                 }
             }

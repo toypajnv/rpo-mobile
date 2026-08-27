@@ -36,11 +36,12 @@ class FormRulesTest {
     }
 
     @Test
-    fun preparationIsReadyOnlyAfterBothDateTimesAreFilled() {
-        val incomplete = FormState(primaryDate = "19.08.2026", primaryTime = "10:00")
-        assertFalse(stageDataReady(incomplete))
-        val complete = incomplete.copy(secondaryDate = "19.08.2026", secondaryTime = "11:00")
-        assertTrue(stageDataReady(complete))
+    fun preparationCanBeSavedWithStartOnlyAndValidOptionalEnd() {
+        val startOnly = FormState(primaryDate = "19.08.2026", primaryTime = "10:00")
+        assertTrue(stageDataReady(startOnly))
+        assertFalse(stageDataReady(startOnly.copy(secondaryDate = "19.08.2026")))
+        assertFalse(stageDataReady(startOnly.copy(secondaryDate = "19.08.2026", secondaryTime = "09:59")))
+        assertTrue(stageDataReady(startOnly.copy(secondaryDate = "19.08.2026", secondaryTime = "11:00")))
     }
 
     @Test
@@ -61,7 +62,7 @@ class FormRulesTest {
 
     @Test
     fun serverFieldsMapToCompletedUserStages() {
-        val ids = savedStageIdsForFieldKeys(setOf("AT", "AU", "AV", "AY", "BC", "BE"))
+        val ids = savedStageIdsForFieldKeys(setOf("AT", "AV", "AY", "BE"))
         assertTrue("PREPARATION" in ids)
         assertTrue("TRANSFER_WORK" in ids)
         assertTrue("ACTUAL_WORK" in ids)

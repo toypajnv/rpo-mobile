@@ -2,6 +2,9 @@ package ru.rpo.mobile.ui
 
 import android.app.DatePickerDialog
 import android.content.Context
+import android.view.Gravity
+import android.widget.LinearLayout
+import android.widget.NumberPicker
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,8 +22,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 private val Navy = Color(0xFF073C77)
@@ -280,7 +285,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
                     error = s.errors["primary"],
                 )
                 DateTimeBlock(
-                    title = requireNotNull(s.stage.second).title,
+                    title = requireNotNull(s.stage.second).title + " (можно заполнить позже)",
                     date = s.secondaryDate,
                     time = s.secondaryTime,
                     onDate = vm::updateSecondaryDate,
@@ -487,6 +492,7 @@ private fun PermitField(
                 expanded = expanded && suggestions.isNotEmpty(),
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.fillMaxWidth(.92f),
+                properties = PopupProperties(focusable = false),
             ) {
                 suggestions.forEach { memory ->
                     DropdownMenuItem(
@@ -552,6 +558,62 @@ private fun DateField(value: String, onDate: (String) -> Unit, error: String?) {
     }
 }
 
+private fun showTimeSpinner(context: Context, value: String, onTime: (String) -> Unit) {
+    val initial = runCatching { LocalTime.parse(value, DateTimeFormatter.ofPattern("HH:mm")) }
+        .getOrElse { LocalTime.now() }
+    val hours = NumberPicker(context).apply {
+        minValue = 0
+        maxValue = 23
+        this.value = initial.hour
+        wrapSelectorWheel = true
+        setFormatter { String.format("%02d", it) }
+    }
+    val minutes = NumberPicker(context).apply {
+        minValue = 0
+        maxValue = 59
+        this.value = initial.minute
+        wrapSelectorWheel = true
+        setFormatter { String.format("%02d", it) }
+    }
+    val density = context.resources.displayMetrics.density
+    val pad = (16 * density).toInt()
+    val container = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        setPadding(pad, 0, pad, 0)
+        addView(hours, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(minutes, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+    }
+    android.app.AlertDialog.Builder(context)
+        .setTitle("Выберите время")
+        .setView(container)
+        .setNegativeButton("Отмена", null)
+        .setPositiveButton("Выбрать") { _, _ ->
+            onTime(String.format("%02d:%02d", hours.value, minutes.value))
+        }
+        .show()
+}
+
+@Composable
+private fun TimeField(value: String, onTime: (String) -> Unit) {
+    val context = LocalContext.current
+    OutlinedButton(
+        onClick = { showTimeSpinner(context, value, onTime) },
+        modifier = Modifier.fillMaxWidth().height(56.dp),
+        shape = RoundedCornerShape(11.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+    ) {
+        Text(
+            value.ifBlank { "Выберите время" },
+            Modifier.weight(1f),
+            color = if (value.isBlank()) Color.Gray else Color.Unspecified,
+            maxLines = 1,
+            softWrap = false,
+        )
+        Icon(Icons.Default.Schedule, "Открыть выбор времени")
+    }
+}
+
 @Composable
 private fun DateTimeBlock(
     title: String,
@@ -566,7 +628,7 @@ private fun DateTimeBlock(
         Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         DateField(date, onDate, error)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-            Box(Modifier.weight(1f)) { Field(null, time, onTime, "ЧЧ:ММ", null) }
+            Box(Modifier.weight(1f)) { TimeField(time, onTime) }
             OutlinedButton(
                 onClick = onNow,
                 modifier = Modifier.weight(1f).height(56.dp),
@@ -754,7 +816,7 @@ private fun HelpScreen() {
                 "2. Введите номер НД. Ранее использованные номера появляются в подсказках и могут быть подставлены одним нажатием.\n\n" +
                 "3. Выберите этап. Передача объекта и фактическое начало/окончание работ теперь заполняются отдельными блоками.\n\n" +
                 "4. Заполните выбранный этап и обязательно нажмите «Сохранить этап». Сохранённые этапы отмечаются зелёной галочкой. При попытке уйти с изменённого, но не сохранённого этапа приложение покажет предупреждение.\n\n" +
-                "5. Дату выбирайте из календаря, время вводите вручную или кнопкой «Сейчас». Для остановки обязательна причина, а для возобновления — комментарий. Для продления РПО укажите новую дату окончания.\n\n" +
+                "5. Дату выбирайте из календаря, время — прокруткой часов и минут или кнопкой «Сейчас». Для подготовки и фактических работ можно сначала передать только начало, а окончание заполнить позже. Для остановки обязательна причина, а для возобновления — комментарий. Для продления РПО укажите новую дату окончания.\n\n" +
                 "6. После нажатия «Сохранить этап» данные сначала сохраняются на телефоне. Если интернета нет, они останутся в очереди и отправятся автоматически после появления сети.\n\n" +
                 "7. Раздел «Замена исполнителей работ» необязательный. При замене укажите ФИО и должность / профессию каждого нового исполнителя.\n\n" +
                 "8. Приложение получает от сервера сообщение о состоянии системы и доступной версии. Старые версии приложения остаются совместимыми с сервером.\n\n" +
