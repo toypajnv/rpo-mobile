@@ -15,24 +15,26 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and health
+      - name: Wait for VPS autodeploy and RPO 1.1.6
         shell: bash
         run: |
           set -euo pipefail
           ok=0
           for attempt in $(seq 1 36); do
-            if response="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null)" \
-              && [[ "$response" == *'"status":"ok"'* ]]; then
-              echo "Production health is OK on attempt $attempt"
-              echo "$response"
+            health="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null || true)"
+            config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=1.0.1' 2>/dev/null || true)"
+            if [[ "$health" == *'"status":"ok"'* ]] && [[ "$config" == *'"latest_app_version":"1.1.6"'* ]]; then
+              echo "Production RPO 1.1.6 is deployed on attempt $attempt"
+              echo "$health"
+              echo "$config"
               ok=1
               break
             fi
-            echo "Waiting for production autodeploy: attempt $attempt/36"
+            echo "Waiting for RPO 1.1.6 autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Production health did not become ready in time" >&2
+            echo "RPO 1.1.6 did not become ready in time" >&2
             exit 1
           fi
 
