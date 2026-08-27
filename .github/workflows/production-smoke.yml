@@ -65,7 +65,7 @@ jobs:
 
           cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
           assert cfg['status']=='ok'
-          assert cfg['latest_app_version']=='1.1.5'
+          assert cfg['latest_app_version']=='1.1.6'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
           print('Old APK remains supported; latest mobile version:', cfg['latest_app_version'])
