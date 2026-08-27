@@ -107,7 +107,7 @@ class Upgrade20260821Tests(unittest.TestCase):
 
     def test_mobile_feedback_marks_old_version_supported_not_required(self) -> None:
         cfg = mobile_config("1.0.1")
-        self.assertEqual(cfg["latest_app_version"], "1.1.5")
+        self.assertEqual(cfg["latest_app_version"], "1.1.6")
         self.assertTrue(cfg["update_available"])
         self.assertFalse(cfg["update_required"])
         self.assertFalse(cfg["maintenance"])
