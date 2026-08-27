@@ -66,8 +66,10 @@ private fun parseFilledDateTime(date: String, time: String): LocalDateTime? = ru
 fun stageDataReady(state: FormState): Boolean = when (state.stage.kind) {
     StageKind.RANGE_DATETIME -> {
         val start = parseFilledDateTime(state.primaryDate, state.primaryTime)
-        val end = parseFilledDateTime(state.secondaryDate, state.secondaryTime)
-        start != null && end != null && !end.isBefore(start)
+        val endBlank = state.secondaryDate.isBlank() && state.secondaryTime.isBlank()
+        val endComplete = state.secondaryDate.isNotBlank() && state.secondaryTime.isNotBlank()
+        val end = if (endComplete) parseFilledDateTime(state.secondaryDate, state.secondaryTime) else null
+        start != null && (endBlank || (end != null && !end.isBefore(start)))
     }
 
     StageKind.TRIPLE_DATETIME -> {

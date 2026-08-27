@@ -68,7 +68,10 @@ val requiredStageCount: Int = requiredStages.size
 fun savedStageCount(savedStageIds: Set<String>): Int = requiredStages.count { it.id in savedStageIds }
 
 fun savedStageIdsForFieldKeys(fieldKeys: Set<String>): Set<String> = stages
-    .filter { stage -> listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key).all { it in fieldKeys } }
+    .filter { stage ->
+        val keys = listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key)
+        if (stage.kind == StageKind.RANGE_DATETIME) stage.first.key in fieldKeys else keys.all { it in fieldKeys }
+    }
     .map { it.id }
     .toSet()
 
