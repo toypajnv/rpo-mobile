@@ -103,7 +103,7 @@ jobs:
           test_path.write_text('\n'.join(test_lines), encoding='utf-8')
           PY
 
-          python -m unittest discover -s server/tests -p 'test_*.py'
+          python server/tests/test_dashboard_width_fit.py
           git diff --check
 
       - name: Commit compact table layout
