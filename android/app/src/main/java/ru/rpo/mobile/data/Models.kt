@@ -10,6 +10,7 @@ data class EventRequest(
     val event_time: String,
     val field_value: String,
     val comment: String,
+    val structural_unit: String? = null,
 )
 
 data class EventResponse(
@@ -23,6 +24,10 @@ data class EventResponse(
     val comment: String,
     val received_at: String,
     val exported_at: String?,
+    val structural_unit: String? = null,
+    val approval_required: Boolean = false,
+    val approval_status: String = "not_required",
+    val approved_at: String? = null,
 )
 
 data class ApiError(val detail: String? = null)
@@ -32,12 +37,26 @@ data class PermitFieldSnapshot(
     val field_value: String = "",
     val event_time: String = "",
     val comment: String = "",
+    val event_id: Long = 0,
+    val approval_required: Boolean = false,
+    val approval_status: String = "not_required",
+    val approved_at: String? = null,
+)
+
+data class PermitApprovalSummary(
+    val status: String = "none",
+    val label: String = "",
+    val pending_count: Int = 0,
+    val approved_count: Int = 0,
+    val approved_at: String? = null,
 )
 
 data class PermitSnapshot(
     val permit_number: String,
     val worker_name: String,
     val updated_at: String,
+    val structural_unit: String = "",
+    val approval: PermitApprovalSummary = PermitApprovalSummary(),
     val fields: Map<String, PermitFieldSnapshot> = emptyMap(),
 )
 
