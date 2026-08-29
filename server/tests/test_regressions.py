@@ -293,7 +293,7 @@ class DashboardStaticTests(unittest.TestCase):
         self.assertIn("Один наряд-допуск — одна строка", template)
         self.assertIn("Ранее выгруженные НД тоже можно", template)
         self.assertIn("dashboard.js?v=20260829-2", template)
-        self.assertIn("app.css?v=20260829-2", template)
+        self.assertIn("app.css?v=20260829-3", template)
         self.assertIn("preview-table", script)
         self.assertIn("stageDetails", script)
         self.assertIn("Показать детали", script)

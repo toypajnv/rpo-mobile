@@ -14,3 +14,40 @@
 .global-filter{display:flex;gap:10px;align-items:end;background:#fff;border:1px solid #e2e9f3;border-radius:14px;padding:10px 12px;margin:0 0 14px;box-shadow:0 3px 16px rgba(16,45,80,.05)}
 .global-filter[hidden]{display:none!important}.search-field{display:flex;align-items:center;gap:8px;flex:1;min-width:240px;border:1px solid #ccd7e7;border-radius:10px;padding:0 11px;height:42px;color:#738198}.search-field input{border:0;outline:0;width:100%;font:inherit;background:transparent}.unit-filter{display:flex;flex-direction:column;gap:3px;font-size:11px;color:#657188}.unit-filter select{height:42px;min-width:180px;border:1px solid #ccd7e7;border-radius:10px;background:#fff;padding:0 10px}.filter-reset{height:42px;border:1px solid #ccd7e7;border-radius:10px;background:#f7f9fc;padding:0 14px;cursor:pointer}.unit-pill{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:#edf3fb;color:#24527f;font-size:11px;font-weight:700;white-space:nowrap}.badge.approval-wait{background:#fff0d6;color:#9a5a00}.badge.neutral{background:#eef1f5;color:#667386}.approve-button{border:0;border-radius:8px;background:#168347;color:#fff;font-weight:700;padding:8px 11px;cursor:pointer;white-space:nowrap}.approve-button:hover{filter:brightness(.95)}.approve-button:disabled{opacity:.6;cursor:wait}.approve-button.small{padding:5px 8px;font-size:11px}.stage-approval{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.approval-count{display:block;color:#9a5a00;margin-top:4px;font-size:10px}.stats{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
 @media(max-width:900px){.global-filter{align-items:stretch;flex-direction:column}.search-field,.unit-filter select{width:100%;min-width:0}.filter-reset{width:100%}}
+/* Dashboard desktop width fit v2.0.1 */
+@media (min-width:1000px){
+  #tab-transmissions .panel,#tab-works .panel{padding:14px}
+  #tab-transmissions .table-wrap,#tab-works .table-wrap{overflow-x:hidden}
+  #tab-transmissions table,#tab-works table{width:100%;table-layout:fixed;white-space:normal;font-size:11px}
+  #tab-transmissions th,#tab-transmissions td,#tab-works th,#tab-works td{padding:8px 5px;line-height:1.2;vertical-align:top;overflow-wrap:anywhere;word-break:normal}
+  #tab-transmissions th,#tab-works th{font-size:10px}
+  #tab-transmissions .wrap-cell,#tab-works .works-stage-cell{min-width:0}
+  #tab-transmissions .unit-pill,#tab-works .unit-pill{white-space:normal;padding:3px 6px;font-size:10px}
+  #tab-transmissions .badge,#tab-works .badge,#tab-works .work-state{white-space:normal;line-height:1.15;text-align:center;justify-content:center;padding:5px 6px}
+  #tab-transmissions .approve-button{white-space:normal;padding:6px 7px;font-size:10px}
+  #tab-works .progress{width:100%;max-width:86px}
+  #tab-works .stage-details summary{padding:7px 8px;gap:5px;align-items:flex-start}
+  #tab-works .stage-details summary small{font-size:9px}
+  #tab-works .stage-detail-line{grid-template-columns:1fr;gap:4px;padding:6px 0}
+  #tab-works .stage-detail-line em{grid-column:1}
+  #tab-transmissions th:nth-child(1),#tab-transmissions td:nth-child(1){width:8%}
+  #tab-transmissions th:nth-child(2),#tab-transmissions td:nth-child(2){width:8%}
+  #tab-transmissions th:nth-child(3),#tab-transmissions td:nth-child(3){width:11%}
+  #tab-transmissions th:nth-child(4),#tab-transmissions td:nth-child(4){width:8%}
+  #tab-transmissions th:nth-child(5),#tab-transmissions td:nth-child(5){width:15%}
+  #tab-transmissions th:nth-child(6),#tab-transmissions td:nth-child(6){width:16%}
+  #tab-transmissions th:nth-child(7),#tab-transmissions td:nth-child(7){width:13%}
+  #tab-transmissions th:nth-child(8),#tab-transmissions td:nth-child(8){width:11%}
+  #tab-transmissions th:nth-child(9),#tab-transmissions td:nth-child(9){width:10%}
+  #tab-works th:nth-child(1),#tab-works td:nth-child(1){width:8%}
+  #tab-works th:nth-child(2),#tab-works td:nth-child(2){width:8%}
+  #tab-works th:nth-child(3),#tab-works td:nth-child(3){width:8%}
+  #tab-works th:nth-child(4),#tab-works td:nth-child(4){width:10%}
+  #tab-works th:nth-child(5),#tab-works td:nth-child(5){width:10%}
+  #tab-works th:nth-child(6),#tab-works td:nth-child(6){width:11%}
+  #tab-works th:nth-child(7),#tab-works td:nth-child(7){width:9%}
+  #tab-works th:nth-child(8),#tab-works td:nth-child(8){width:20%}
+  #tab-works th:nth-child(9),#tab-works td:nth-child(9){width:8%}
+  #tab-works th:nth-child(10),#tab-works td:nth-child(10){width:8%}
+}
+@media (max-width:1700px) and (min-width:1000px){.main{padding-left:22px;padding-right:22px}}
