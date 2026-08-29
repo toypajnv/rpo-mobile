@@ -1,0 +1,60 @@
+name: Apply RPO 2.0 feature patch
+
+on:
+  push:
+    branches: [rpo-2.0-global-update]
+    paths:
+      - '.github/workflows/apply-v2-feature.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: rpo-2.0-global-update
+          fetch-depth: 0
+
+      - name: Apply RPO 2.0 patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ops/apply-main-core-v2-part1.py
+          python ops/apply-main-core-v2-part2.py
+          python ops/apply-main-endpoints-v2.py
+          python ops/apply-android-vm-v2.py
+          python ops/apply-android-ui-v2.py
+          python ops/apply-dashboard-html-v2.py
+          python ops/apply-css-v2.py
+          python ops/apply-tests-v2.py
+          python -m compileall -q server/app server/tests
+          node --check server/app/static/dashboard.js
+
+      - name: Remove one-time patch machinery
+        shell: bash
+        run: |
+          rm -f \
+            ops/apply-main-core-v2-part1.py \
+            ops/apply-main-core-v2-part2.py \
+            ops/apply-main-endpoints-v2.py \
+            ops/apply-android-vm-v2.py \
+            ops/apply-android-ui-v2.py \
+            ops/apply-dashboard-html-v2.py \
+            ops/apply-css-v2.py \
+            ops/apply-tests-v2.py \
+            .github/workflows/apply-v2-feature.yml
+
+      - name: Commit feature implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'RPO 2.0: approvals, structural units and global filters'
+          git push origin HEAD:rpo-2.0-global-update
