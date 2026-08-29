@@ -31,10 +31,10 @@ BASE_DIR = Path(__file__).resolve().parent
 PWA_DIR = BASE_DIR / "pwa"
 REQUIRED_DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
 DASHBOARD_STAGE_KEYS = REQUIRED_DASHBOARD_STAGE_KEYS + ("RI",)
-LATEST_MOBILE_VERSION = "2.0.0"
+LATEST_MOBILE_VERSION = "2.0.1"
 MIN_SUPPORTED_MOBILE_VERSION = "1.0.1"
-MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.0.0-test/rpo-mobile-2.0.0.apk"
-PWA_VERSION = "1.0.0"
+MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.0.1-test/rpo-mobile-2.0.1.apk"
+PWA_VERSION = "1.0.1"
 PWA_URL = "https://rpo-mng.ru/app/"
 DEFAULT_OPERATOR_USERNAME = "Operator"
 DEFAULT_OPERATOR_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$hBSN4f5Hetyo+a4aOvCP3A$7bYB1iB2/8/sS0w1AYTNrdAg3QyVP7KdhTOP2PHCNys"
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.5.1", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.5.2", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", https_only=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/pwa-assets", StaticFiles(directory=PWA_DIR), name="pwa-assets")
@@ -561,6 +561,28 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
     existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == client_event_id))
     if existing:
         return existing
+
+    # Safety net for current and legacy clients: an unchanged stage must not create
+    # a second transmission or reset its operator approval merely because the client
+    # generated a new client_event_id.
+    latest_same_stage = db.scalar(
+        select(MobileEvent)
+        .where(
+            MobileEvent.permit_number == payload.permit_number,
+            MobileEvent.field_key == payload.field_key,
+        )
+        .order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc())
+        .limit(1)
+    )
+    if (
+        latest_same_stage
+        and latest_same_stage.worker_name == payload.worker_name
+        and (latest_same_stage.structural_unit or "") == (payload.structural_unit or "")
+        and dt_utc(latest_same_stage.event_time) == dt_utc(payload.event_time)
+        and latest_same_stage.field_value.strip() == payload.field_value.strip()
+        and (latest_same_stage.comment or "").strip() == payload.comment.strip()
+    ):
+        return latest_same_stage
     try:
         validate_event(db, payload)
     except EventValidationError as e:
@@ -625,6 +647,31 @@ def mobile_config(app_version: str = Query(default="", max_length=32)):
         "pwa_url": PWA_URL,
         "checked_at": utcnow().isoformat(),
     }
+
+
+@app.get("/api/mobile/permit-suggestions")
+def mobile_permit_suggestions(
+    q: str = Query(min_length=3, max_length=80),
+    limit: int = Query(8, ge=1, le=12),
+    db: Session = Depends(get_db),
+):
+    query = q.strip().upper()
+    pattern = f"%{query}%"
+    records = list(db.scalars(
+        select(PermitRecord)
+        .where(PermitRecord.permit_number.ilike(pattern))
+        .order_by(PermitRecord.updated_at.desc())
+        .limit(limit)
+    ))
+    return [
+        {
+            "permit_number": record.permit_number,
+            "worker_name": record.worker_name,
+            "structural_unit": record.structural_unit or "",
+            "updated_at": record.updated_at.isoformat(),
+        }
+        for record in records
+    ]
 
 
 @app.get("/api/mobile/permit")

@@ -12,7 +12,7 @@
   <link rel="manifest" href="/app/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/app/icon-180.png">
   <link rel="icon" sizes="192x192" href="/app/icon-192.png">
-  <link rel="stylesheet" href="/pwa-assets/app.css?v=20260829-1">
+  <link rel="stylesheet" href="/pwa-assets/app.css?v=20260829-2">
 </head>
 <body>
   <div class="app-shell">
@@ -60,6 +60,7 @@
           <div class="permit-wrap">
             <input id="permit-number" class="control" type="text" inputmode="text" autocomplete="off" placeholder="Например: СН-038364" maxlength="80" list="permit-suggestions">
             <datalist id="permit-suggestions"></datalist>
+            <div id="permit-suggestion-menu" class="permit-suggestion-menu" hidden></div>
             <button id="permit-refresh" class="field-action" type="button" aria-label="Загрузить данные НД">↻</button>
           </div>
           <div class="field-hint">При точном совпадении ранее заполненные данные автоматически загружаются с сервера.</div>
@@ -106,7 +107,7 @@
         </section>
         <section class="card help-card"><h2>Работа без интернета</h2><p>Если сеть пропала, заполненные события сохраняются на устройстве. РПО повторит отправку при следующем открытии приложения или после восстановления сети.</p></section>
         <section class="card help-card"><h2>Разрешение оператора</h2><p>После передачи этапа появится статус «Ожидает разрешения». Когда оператор подтвердит этап на сервере, статус автоматически изменится на «Работы можно проводить». Остановка работ подтверждения не требует.</p></section>
-        <section class="card help-card"><h2>Версия</h2><p>PWA 1.0.0 · единая система с Android РПО 2.0.0.</p></section>
+        <section class="card help-card"><h2>Версия</h2><p>PWA 1.0.1 · единая система с Android РПО 2.0.1.</p></section>
       </section>
     </main>
 
@@ -116,6 +117,6 @@
       <button type="button" class="nav-item" data-tab="help"><span>?</span><b>Справка</b></button>
     </nav>
   </div>
-  <script src="/pwa-assets/app.js?v=20260829-1" defer></script>
+  <script src="/pwa-assets/app.js?v=20260829-2" defer></script>
 </body>
 </html>

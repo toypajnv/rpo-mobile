@@ -851,6 +851,7 @@ private fun CheckLine(ok: Boolean, text: String) {
 
 @Composable
 private fun HistoryScreen(items: List<ru.rpo.mobile.data.EventResponse>) {
+    var expandedPermit by remember { mutableStateOf<String?>(null) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -859,29 +860,46 @@ private fun HistoryScreen(items: List<ru.rpo.mobile.data.EventResponse>) {
         Text("Последние записи, подтверждённые сервером", color = Color.Gray)
         if (items.isEmpty()) Text("Переданных записей пока нет.", Modifier.padding(top = 24.dp), color = Color.Gray)
         items.forEach { e ->
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp)) {
-                    Row {
+            val expanded = expandedPermit == e.permit_number
+            ElevatedCard(
+                Modifier.fillMaxWidth().clickable {
+                    expandedPermit = if (expanded) null else e.permit_number
+                }
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(e.permit_number, fontWeight = FontWeight.Bold, color = Navy)
                         Spacer(Modifier.weight(1f))
-                        Text(e.field_key, color = Blue, fontWeight = FontWeight.Bold)
+                        Icon(
+                            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            if (expanded) "Скрыть данные" else "Открыть данные",
+                            tint = Blue,
+                        )
                     }
                     Text(e.stage_label, fontWeight = FontWeight.SemiBold)
                     if (!e.structural_unit.isNullOrBlank()) Text(e.structural_unit.orEmpty(), color = Blue, fontSize = 12.sp)
-                    Text(e.field_value, color = Color.DarkGray)
-                    if (e.comment.isNotBlank()) Text(e.comment, color = Color.Gray, fontSize = 12.sp)
                     Text(
                         if (e.approval_required) approvalStatusLabel(e.approval_status) else "Разрешение не требуется",
                         color = if (e.approval_status == "approved") Green else if (e.approval_status == "pending") Orange else Blue,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 7.dp),
                     )
-                    Text(
-                        if (e.exported_at == null) "На сервере · не выгружено" else "Выгружено оператором",
-                        color = Color.Gray,
-                        fontSize = 11.sp,
-                    )
+                    if (expanded) {
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        Text("Переданные данные", fontWeight = FontWeight.SemiBold)
+                        Text(e.field_value, color = Color.DarkGray)
+                        if (e.comment.isNotBlank()) {
+                            Text("Комментарии", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            Text(e.comment, color = Color.Gray, fontSize = 12.sp)
+                        }
+                        Text(
+                            if (e.exported_at == null) "На сервере · не выгружено" else "Выгружено оператором",
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                        )
+                    } else {
+                        Text("Нажмите, чтобы посмотреть ранее переданные данные", color = Color.Gray, fontSize = 11.sp)
+                    }
                 }
             }
         }

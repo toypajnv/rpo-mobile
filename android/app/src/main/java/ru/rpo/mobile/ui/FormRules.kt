@@ -63,6 +63,15 @@ private fun parseFilledDateTime(date: String, time: String): LocalDateTime? = ru
     LocalDateTime.of(LocalDate.parse(date, rpoDateFormatter), LocalTime.parse(time, rpoTimeFormatter))
 }.getOrNull()
 
+fun shouldSendStageField(
+    serverValue: String?,
+    serverComment: String?,
+    newValue: String,
+    newComment: String,
+): Boolean = serverValue == null ||
+    serverValue.trim() != newValue.trim() ||
+    serverComment.orEmpty().trim() != newComment.trim()
+
 fun stageDataReady(state: FormState): Boolean = when (state.stage.kind) {
     StageKind.RANGE_DATETIME -> {
         val start = parseFilledDateTime(state.primaryDate, state.primaryTime)

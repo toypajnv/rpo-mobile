@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and PWA 1.0.0
+      - name: Wait for VPS autodeploy and PWA 1.0.1
         shell: bash
         run: |
           set -euo pipefail
@@ -25,18 +25,19 @@ jobs:
             config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=1.0.1' 2>/dev/null || true)"
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
             if [[ "$health" == *'"status":"ok"'* ]] \
-              && [[ "$config" == *'"server_version":"0.5.1"'* ]] \
-              && [[ "$config" == *'"pwa_version":"1.0.0"'* ]] \
-              && [[ "$pwa" == *'PWA 1.0.0'* ]]; then
-              echo "Production PWA 1.0.0 is deployed on attempt $attempt"
+              && [[ "$config" == *'"server_version":"0.5.2"'* ]] \
+              && [[ "$config" == *'"latest_app_version":"2.0.1"'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.0.1"'* ]] \
+              && [[ "$pwa" == *'PWA 1.0.1'* ]]; then
+              echo "Production Android 2.0.1 / PWA 1.0.1 is deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for PWA autodeploy: attempt $attempt/36"
+            echo "Waiting for cross-platform autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "PWA 1.0.0 did not become ready in time" >&2
+            echo "Android 2.0.1 / PWA 1.0.1 did not become ready in time" >&2
             exit 1
           fi
 
@@ -48,6 +49,7 @@ jobs:
           grep -F 'apple-mobile-web-app-capable' /tmp/rpo-pwa.html
           grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
           grep -F 'На экран Домой' /tmp/rpo-pwa.html
+          grep -F 'permit-suggestion-menu' /tmp/rpo-pwa.html
 
           curl -fsS --max-time 10 https://rpo-mng.ru/app/manifest.webmanifest -o /tmp/rpo-manifest.json
           python3 - <<'PY'
@@ -63,7 +65,7 @@ jobs:
 
           curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
-          grep -F "rpo-pwa-shell-v1.0.0" /tmp/sw.js
+          grep -F "rpo-pwa-shell-v1.0.1" /tmp/sw.js
 
           curl -fsS -D /tmp/icon-headers.txt --max-time 10 https://rpo-mng.ru/app/icon-180.png -o /tmp/icon.png
           grep -Fi 'content-type: image/png' /tmp/icon-headers.txt
@@ -86,6 +88,7 @@ jobs:
           paths = spec.get('paths', {})
           required = [
               '/api/mobile/permit',
+              '/api/mobile/permit-suggestions',
               '/api/mobile/config',
               '/api/operator/events/{event_id}/approve',
               '/api/operator/analytics',
@@ -107,10 +110,10 @@ jobs:
 
           cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
           assert cfg['status']=='ok'
-          assert cfg['latest_app_version']=='2.0.0'
+          assert cfg['latest_app_version']=='2.0.1'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          assert cfg['pwa_version']=='1.0.0'
+          assert cfg['pwa_version']=='1.0.1'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
           print('Old APK remains supported; PWA:', cfg['pwa_url'])
           PY
