@@ -68,4 +68,12 @@ class FormRulesTest {
         assertTrue("ACTUAL_WORK" in ids)
         assertTrue("EXTEND_WORK" in ids)
     }
+    @Test
+    fun unchangedServerFieldIsNotSentAgain() {
+        assertFalse(shouldSendStageField("29.08.2026 10:00", "", "29.08.2026 10:00", ""))
+        assertTrue(shouldSendStageField("29.08.2026 10:00", "", "29.08.2026 11:00", ""))
+        assertTrue(shouldSendStageField("29.08.2026 10:00", "Старый", "29.08.2026 10:00", "Новый"))
+        assertTrue(shouldSendStageField(null, null, "29.08.2026 10:00", ""))
+    }
+
 }

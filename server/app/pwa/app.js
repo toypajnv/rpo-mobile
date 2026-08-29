@@ -1,8 +1,8 @@
 (() => {
   'use strict';
 
-  const PWA_VERSION = '1.0.0';
-  const ANDROID_API_VERSION = '2.0.0';
+  const PWA_VERSION = '1.0.1';
+  const ANDROID_API_VERSION = '2.0.1';
   const UNITS = ['ЦДПН-1','ЦДПН-2','ЦДПН-3','ЦДПН-4','ЦППН-1','ЦППН-2','ЦСДиТГ','ЦСиР','ЦТОиРТ-1','ЦТОиРТ-2'];
   const STAGES = [
     {id:'PREPARATION',title:'Подготовка',kind:'range',events:[['AT','Начало подготовки'],['AU','Окончание подготовки']]},
@@ -33,6 +33,9 @@
   let approvalTimer = null;
   let baselineFingerprint = '';
   let replacementCounter = 1;
+  let remotePermitSuggestions = [];
+  let permitSuggestionTimer = null;
+  let noNewEvents = false;
 
   function jsonRead(key, fallback) {
     try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
@@ -99,12 +102,40 @@
     jsonWrite(STORAGE.memories, items.slice(0,40));
     renderPermitSuggestions();
   }
-  function renderPermitSuggestions() {
-    const list = $('permit-suggestions');
-    list.replaceChildren(...memories().map(m => {
-      const option=document.createElement('option'); option.value=m.permitNumber; option.label=m.workerName || m.structuralUnit || ''; return option;
-    }));
+  function combinedPermitSuggestions() {
+    const byPermit = new Map();
+    [...memories().map(m=>({permit_number:m.permitNumber,worker_name:m.workerName,structural_unit:m.structuralUnit||''})), ...remotePermitSuggestions]
+      .forEach(item=>{const key=String(item.permit_number||'').toUpperCase();if(key&&!byPermit.has(key))byPermit.set(key,item);});
+    return [...byPermit.values()];
   }
+  function selectPermitSuggestion(item) {
+    permit.value=stripLatin(item.permit_number||'').toUpperCase();
+    if(item.worker_name)worker.value=stripLatin(item.worker_name);
+    if(UNITS.includes(item.structural_unit))unit.value=item.structural_unit;
+    const menu=$('permit-suggestion-menu');if(menu)menu.hidden=true;
+    lookupPermit(true);updateChecklist();
+  }
+  function renderPermitSuggestions() {
+    const items=combinedPermitSuggestions();
+    const list=$('permit-suggestions');
+    list.replaceChildren(...items.map(m=>{const option=document.createElement('option');option.value=m.permit_number;option.label=m.worker_name||m.structural_unit||'';return option;}));
+    const menu=$('permit-suggestion-menu');if(!menu)return;
+    const q=permit.value.trim().toUpperCase();
+    const filtered=items.filter(m=>!q||String(m.permit_number||'').toUpperCase().includes(q)).slice(0,8);
+    if(document.activeElement!==permit||!filtered.length){menu.hidden=true;menu.innerHTML='';return;}
+    menu.innerHTML=filtered.map((m,i)=>`<button type="button" class="permit-suggestion-item" data-index="${i}"><strong>${escapeHtml(m.permit_number)}</strong><span>${escapeHtml(m.worker_name||m.structural_unit||'Ранее заполненный НД')}</span></button>`).join('');
+    menu.hidden=false;
+    menu.querySelectorAll('[data-index]').forEach(btn=>btn.addEventListener('mousedown',e=>e.preventDefault()));
+    menu.querySelectorAll('[data-index]').forEach(btn=>btn.addEventListener('click',()=>selectPermitSuggestion(filtered[Number(btn.dataset.index)])));
+  }
+  async function fetchRemotePermitSuggestions() {
+    const q=permit.value.trim().toUpperCase();
+    if(q.length<3||!navigator.onLine){remotePermitSuggestions=[];renderPermitSuggestions();return;}
+    try{const r=await fetch(`/api/mobile/permit-suggestions?q=${encodeURIComponent(q)}&limit=8`,{cache:'no-store'});if(r.ok)remotePermitSuggestions=await r.json();}
+    catch(_){}
+    renderPermitSuggestions();
+  }
+  function schedulePermitSuggestions(){clearTimeout(permitSuggestionTimer);renderPermitSuggestions();if(permit.value.trim().length>=3)permitSuggestionTimer=setTimeout(fetchRemotePermitSuggestions,250);}
 
   function savedStore() { return jsonRead(STORAGE.saved, {}); }
   function savedForPermit() {
@@ -246,7 +277,10 @@
     } else if(s.kind==='replacements') {
       const rows=replacementRows();if(!rows.length||!rows.every(r=>r.name.length>=3&&r.position.length>=2)){$('replacement-error').textContent='Для каждой замены укажите ФИО и должность / профессию';ok=false;}if(ok)events.push(makeEvent('RI','Замена исполнителей работ',new Date().toISOString(),rows.map(r=>`${r.name}\t${r.position}`).join('\n'),''));
     }
-    return ok?events:[];
+    if(!ok){noNewEvents=false;return [];}
+    const fresh=events.filter(event=>{const old=fieldServer(event.field_key);return !old||String(old.field_value||'').trim()!==String(event.field_value||'').trim()||String(old.comment||'').trim()!==String(event.comment||'').trim();});
+    noNewEvents=events.length>0&&fresh.length===0;
+    return fresh;
   }
 
   function queue(){return jsonRead(STORAGE.queue,[]);}
@@ -261,17 +295,18 @@
 
   function renderApproval(approval){currentApproval=approval||null;const card=$('approval-card');if(!approval||approval.status==='none'){card.hidden=true;return;}card.hidden=false;card.className=`approval-card ${approval.status}`;const map={pending:['◷','Ожидает разрешения',`Передано на сервер. Ожидающих разрешения этапов: ${approval.pending_count||1}.`],approved:['✓','Работы можно проводить','Оператор подтвердил последние переданные этапы.'],stopped:['!','Работы остановлены','Для возобновления передайте этап «Возобновление работ» и дождитесь разрешения оператора.'],not_required:['•','Разрешение не требуется','Для этого события отдельное разрешение не требуется.']};const v=map[approval.status]||['•',approval.label||'Статус',''];$('approval-icon').textContent=v[0];$('approval-title').textContent=v[1];$('approval-text').textContent=v[2];}
 
-  function applyPermitData(data){serverFields=data.fields||{};if(data.worker_name)worker.value=stripLatin(data.worker_name);if(UNITS.includes(data.structural_unit))unit.value=data.structural_unit;renderApproval(data.approval);renderStageOptions();renderStageFields();localStorage.setItem(STORAGE.worker,worker.value);localStorage.setItem(STORAGE.unit,unit.value);rememberPermit();}
-  async function lookupPermit(silent=false){const p=permit.value.trim().toUpperCase();if(!permitValid(p)||!navigator.onLine)return false;try{const r=await fetch(`/api/mobile/permit?permit_number=${encodeURIComponent(p)}`,{cache:'no-store'});if(r.status===404){serverFields={};renderApproval(null);renderStageOptions();renderStageFields();return false;}if(!r.ok)throw new Error('lookup');const data=await r.json();applyPermitData(data);if(!silent)showFlash(true,'Данные НД загружены','Ранее переданные этапы и статус получены с сервера.');return true;}catch(_){if(!silent)showFlash(false,'Нет связи','Не удалось получить данные НД. Можно продолжить — новые данные сохранятся локально.');return false;}}
+  function hasStageDraft(){return stageFingerprint()!==baselineFingerprint;}
+  function applyPermitData(data,preserveDraft=false){serverFields=data.fields||{};if(data.worker_name)worker.value=stripLatin(data.worker_name);if(UNITS.includes(data.structural_unit))unit.value=data.structural_unit;renderApproval(data.approval);renderStageOptions();if(!preserveDraft)renderStageFields();else updateChecklist();localStorage.setItem(STORAGE.worker,worker.value);localStorage.setItem(STORAGE.unit,unit.value);rememberPermit();}
+  async function lookupPermit(silent=false){const p=permit.value.trim().toUpperCase();if(!permitValid(p)||!navigator.onLine)return false;try{const r=await fetch(`/api/mobile/permit?permit_number=${encodeURIComponent(p)}`,{cache:'no-store'});const preserveDraft=hasStageDraft();if(r.status===404){serverFields={};renderApproval(null);renderStageOptions();if(!preserveDraft)renderStageFields();else updateChecklist();return false;}if(!r.ok)throw new Error('lookup');const data=await r.json();applyPermitData(data,preserveDraft);if(!silent)showFlash(true,'Данные НД загружены','Ранее переданные этапы и статус получены с сервера.');return true;}catch(_){if(!silent)showFlash(false,'Нет связи','Не удалось получить данные НД. Можно продолжить — новые данные сохранятся локально.');return false;}}
   function scheduleLookup(){clearTimeout(permitLookupTimer);if(permitValid())permitLookupTimer=setTimeout(()=>lookupPermit(true),550);else{serverFields={};renderApproval(null);renderStageOptions();updateChecklist();}}
   function startApprovalPolling(){clearInterval(approvalTimer);approvalTimer=setInterval(()=>{if(document.visibilityState==='visible'&&navigator.onLine&&permitValid())lookupPermit(true);},8000);}
 
   async function systemStatus(){if(!navigator.onLine)return;try{const r=await fetch(`/api/mobile/config?app_version=${encodeURIComponent(ANDROID_API_VERSION)}`,{cache:'no-store'});if(!r.ok)return;const cfg=await r.json();const box=$('system-notice');box.hidden=false;box.className=`notice ${cfg.maintenance?'queue-notice':'info-notice'}`;$('system-title').textContent=cfg.maintenance?'Система на обслуживании':'Связь с сервером установлена';$('system-text').textContent=cfg.maintenance?cfg.message:`${cfg.message} PWA ${PWA_VERSION}.`;setTimeout(()=>{if(!cfg.maintenance)box.hidden=true;},4500);}catch(_){} }
 
-  function renderHistory(items){const list=$('history-list');if(!items.length){list.innerHTML='<div class="card"><p class="subtitle">История на этом устройстве пока пуста.</p></div>';return;}list.innerHTML=items.map(x=>{const dt=new Date(x.received_at);const when=Number.isNaN(dt.getTime())?'':dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});const a=x.approval_status==='pending'?'pending':x.approval_status==='approved'?'approved':'';return `<article class="history-card"><div class="history-head"><strong>${escapeHtml(x.permit_number)}</strong><time>${when}</time></div><p>${escapeHtml(x.worker_name||'')}</p><p>${escapeHtml(x.field_value||'')}</p><div class="history-meta"><span class="pill">${escapeHtml(x.structural_unit||'—')}</span><span class="pill ${a}">${x.approval_status==='pending'?'Ожидает разрешения':x.approval_status==='approved'?'Разрешено':'Статус записан'}</span></div></article>`;}).join('');}
+  function renderHistory(items){const list=$('history-list');if(!items.length){list.innerHTML='<div class="card"><p class="subtitle">История на этом устройстве пока пуста.</p></div>';return;}list.innerHTML=items.map((x,i)=>{const dt=new Date(x.received_at);const when=Number.isNaN(dt.getTime())?'':dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});const a=x.approval_status==='pending'?'pending':x.approval_status==='approved'?'approved':'';return `<article class="history-card history-clickable" data-history-index="${i}"><div class="history-head"><strong>${escapeHtml(x.permit_number)}</strong><time>${when}</time></div><p>${escapeHtml(x.worker_name||'')}</p><div class="history-meta"><span class="pill">${escapeHtml(x.structural_unit||'—')}</span><span class="pill ${a}">${x.approval_status==='pending'?'Ожидает разрешения':x.approval_status==='approved'?'Разрешено':'Статус записан'}</span></div><div class="history-open-hint">Нажмите, чтобы посмотреть переданные данные ›</div><div class="history-details" hidden><strong>Переданные данные</strong><p>${escapeHtml(x.field_value||'')}</p>${x.comment?`<strong>Комментарии</strong><p>${escapeHtml(x.comment)}</p>`:''}</div></article>`;}).join('');list.querySelectorAll('[data-history-index]').forEach(card=>card.addEventListener('click',()=>{const details=card.querySelector('.history-details'),hint=card.querySelector('.history-open-hint');const opening=details.hidden;list.querySelectorAll('.history-details').forEach(x=>x.hidden=true);list.querySelectorAll('.history-open-hint').forEach(x=>x.hidden=false);details.hidden=!opening;hint.hidden=opening;}));}
   async function loadHistory(){if(navigator.onLine){try{const r=await fetch(`/api/mobile/events?device_id=${encodeURIComponent(deviceId())}&limit=30`,{cache:'no-store'});if(r.ok){renderHistory(await r.json());return;}}catch(_){}}const local=memories().map((m,i)=>({id:i,permit_number:m.permitNumber,worker_name:m.workerName,structural_unit:m.structuralUnit,field_value:'Сохранено на этом устройстве',approval_status:'',received_at:m.updatedAt}));renderHistory(local);}
 
-  async function saveStage(){const events=buildEvents();updateChecklist();if(!events.length){showFlash(false,'Проверьте заполнение','Исправьте отмеченные поля и повторите сохранение.');return;}saveButton.disabled=true;enqueue(events);markStageSaved(currentStage().id);rememberPermit();localStorage.setItem(STORAGE.worker,worker.value.trim());localStorage.setItem(STORAGE.unit,unit.value);renderStageOptions();baselineFingerprint=stageFingerprint();updateChecklist();showFlash(true,'Данные сохранены на iPhone',navigator.onLine?'Выполняется отправка на сервер...':'Нет сети. Отправка произойдёт автоматически.');await syncQueue(true);saveButton.disabled=false;}
+  async function saveStage(){const events=buildEvents();updateChecklist();if(!events.length){if(noNewEvents){markStageSaved(currentStage().id);baselineFingerprint=stageFingerprint();updateChecklist();showFlash(true,'Уже передано','Заполненные данные этого этапа уже есть на сервере.');return;}showFlash(false,'Проверьте заполнение','Исправьте отмеченные поля и повторите сохранение.');return;}saveButton.disabled=true;enqueue(events);markStageSaved(currentStage().id);rememberPermit();localStorage.setItem(STORAGE.worker,worker.value.trim());localStorage.setItem(STORAGE.unit,unit.value);renderStageOptions();baselineFingerprint=stageFingerprint();updateChecklist();showFlash(true,'Данные сохранены на iPhone',navigator.onLine?'Выполняется отправка на сервер...':'Нет сети. Отправка произойдёт автоматически.');await syncQueue(true);saveButton.disabled=false;}
 
   function setupNavigation(){document.querySelectorAll('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{const tab=btn.dataset.tab;document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x===btn));document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.dataset.screen===tab));window.scrollTo({top:0,behavior:'instant'});if(tab==='history')loadHistory();}));}
   function setupInstall(){const standalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);const card=$('install-card');if(!standalone&&isIOS&&localStorage.getItem(STORAGE.installHidden)!=='1')card.hidden=false;$('install-close').addEventListener('click',()=>{card.hidden=true;localStorage.setItem(STORAGE.installHidden,'1');});}
@@ -281,7 +316,7 @@
     worker.value=stripLatin(localStorage.getItem(STORAGE.worker)||'');unit.value=localStorage.getItem(STORAGE.unit)||'';
     sanitizeTextInput(worker,'worker-error');sanitizeTextInput(permit,'permit-error');
     worker.addEventListener('change',()=>localStorage.setItem(STORAGE.worker,worker.value.trim()));unit.addEventListener('change',()=>{localStorage.setItem(STORAGE.unit,unit.value);updateChecklist();});
-    permit.addEventListener('input',()=>{permit.value=stripLatin(permit.value).toUpperCase();scheduleLookup();renderPermitSuggestions();updateChecklist();});permit.addEventListener('change',()=>{permit.value=stripLatin(permit.value).toUpperCase();lookupPermit(true);});
+    permit.addEventListener('input',()=>{permit.value=stripLatin(permit.value).toUpperCase();scheduleLookup();schedulePermitSuggestions();updateChecklist();});permit.addEventListener('focus',schedulePermitSuggestions);permit.addEventListener('blur',()=>setTimeout(()=>{const menu=$('permit-suggestion-menu');if(menu)menu.hidden=true;},180));permit.addEventListener('change',()=>{permit.value=stripLatin(permit.value).toUpperCase();lookupPermit(true);});
     $('permit-refresh').addEventListener('click',()=>lookupPermit(false));stageSelect.addEventListener('change',renderStageFields);saveButton.addEventListener('click',saveStage);$('retry-queue').addEventListener('click',retryFailed);$('history-refresh').addEventListener('click',loadHistory);
     window.addEventListener('online',()=>{systemStatus();syncQueue(false);if(permitValid())lookupPermit(true);});window.addEventListener('offline',()=>showFlash(true,'Нет сети','РПО продолжит сохранять данные локально.'));
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){systemStatus();syncQueue(false);if(permitValid())lookupPermit(true);}});

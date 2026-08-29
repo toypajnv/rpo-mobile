@@ -91,6 +91,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     private var permitLookupJob: Job? = null
     private var approvalPollingJob: Job? = null
     private var serverPermitSnapshot: PermitSnapshot? = null
+    private var stageEditRevision: Long = 0
 
     private val _state = MutableStateFlow(
         FormState(
@@ -238,6 +239,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     private fun schedulePermitLookup(permitNumber: String, immediate: Boolean = false) {
         permitLookupJob?.cancel()
         val normalized = permitNumber.trim().uppercase()
+        val revisionAtSchedule = stageEditRevision
         if (!permitRegex.matches(normalized)) {
             serverPermitSnapshot = null
             _state.value = _state.value.copy(serverSavedStageIds = emptySet())
@@ -264,7 +266,12 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                         message = "Ранее заполненные данные по НД загружены с сервера",
                         success = true,
                     )
-                    _state.value = applySnapshotToStage(base, base.stage, snapshot)
+                    _state.value = if (stageEditRevision == revisionAtSchedule) {
+                        applySnapshotToStage(base, base.stage, snapshot)
+                    } else {
+                        // A delayed server lookup must never erase a date/time the worker just entered.
+                        base
+                    }
                     if (worker.isNotBlank()) prefs.edit().putString("worker_name", worker).apply()
                     if (unit.isNotBlank()) prefs.edit().putString("structural_unit", unit).apply()
                     startApprovalPolling(normalized)
@@ -334,20 +341,23 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = applySnapshotToStage(_state.value, v, snapshot)
     }
 
-    fun updatePrimaryDate(v: String) { _state.value = _state.value.copy(primaryDate = v.take(10), message = null) }
-    fun updatePrimaryTime(v: String) { _state.value = _state.value.copy(primaryTime = v.take(5), message = null) }
-    fun updateSecondaryDate(v: String) { _state.value = _state.value.copy(secondaryDate = v.take(10), message = null) }
-    fun updateSecondaryTime(v: String) { _state.value = _state.value.copy(secondaryTime = v.take(5), message = null) }
-    fun updateThirdDate(v: String) { _state.value = _state.value.copy(thirdDate = v.take(10), message = null) }
-    fun updateThirdTime(v: String) { _state.value = _state.value.copy(thirdTime = v.take(5), message = null) }
-    fun updateExtensionDate(v: String) { _state.value = _state.value.copy(extensionDate = v.take(10), message = null) }
-    fun updateStopReason(v: String) { _state.value = _state.value.copy(stopReason = v.take(500), message = null) }
-    fun updateComment(v: String) { _state.value = _state.value.copy(comment = v.take(500), message = null) }
+    private fun stageEdited() { stageEditRevision++ }
+
+    fun updatePrimaryDate(v: String) { stageEdited(); _state.value = _state.value.copy(primaryDate = v.take(10), message = null) }
+    fun updatePrimaryTime(v: String) { stageEdited(); _state.value = _state.value.copy(primaryTime = v.take(5), message = null) }
+    fun updateSecondaryDate(v: String) { stageEdited(); _state.value = _state.value.copy(secondaryDate = v.take(10), message = null) }
+    fun updateSecondaryTime(v: String) { stageEdited(); _state.value = _state.value.copy(secondaryTime = v.take(5), message = null) }
+    fun updateThirdDate(v: String) { stageEdited(); _state.value = _state.value.copy(thirdDate = v.take(10), message = null) }
+    fun updateThirdTime(v: String) { stageEdited(); _state.value = _state.value.copy(thirdTime = v.take(5), message = null) }
+    fun updateExtensionDate(v: String) { stageEdited(); _state.value = _state.value.copy(extensionDate = v.take(10), message = null) }
+    fun updateStopReason(v: String) { stageEdited(); _state.value = _state.value.copy(stopReason = v.take(500), message = null) }
+    fun updateComment(v: String) { stageEdited(); _state.value = _state.value.copy(comment = v.take(500), message = null) }
 
     fun updateReplacementName(index: Int, value: String) {
         val updated = _state.value.replacements.toMutableList()
         if (index !in updated.indices) return
         updated[index] = updated[index].copy(name = value.take(180))
+        stageEdited()
         _state.value = _state.value.copy(replacements = updated, message = null)
     }
 
@@ -355,11 +365,13 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         val updated = _state.value.replacements.toMutableList()
         if (index !in updated.indices) return
         updated[index] = updated[index].copy(position = value.take(180))
+        stageEdited()
         _state.value = _state.value.copy(replacements = updated, message = null)
     }
 
     fun addReplacement() {
         if (_state.value.replacements.size >= 12) return
+        stageEdited()
         _state.value = _state.value.copy(replacements = _state.value.replacements + ReplacementEntry(), message = null)
     }
 
@@ -367,25 +379,30 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         val current = _state.value.replacements
         if (index !in current.indices) return
         val updated = current.filterIndexed { i, _ -> i != index }.ifEmpty { listOf(ReplacementEntry()) }
+        stageEdited()
         _state.value = _state.value.copy(replacements = updated, message = null)
     }
 
     fun nowPrimary() {
         val n = LocalDateTime.now()
+        stageEdited()
         _state.value = _state.value.copy(primaryDate = n.toLocalDate().format(dateFmt), primaryTime = n.toLocalTime().format(timeFmt), message = null)
     }
 
     fun nowSecondary() {
         val n = LocalDateTime.now()
+        stageEdited()
         _state.value = _state.value.copy(secondaryDate = n.toLocalDate().format(dateFmt), secondaryTime = n.toLocalTime().format(timeFmt), message = null)
     }
 
     fun nowThird() {
         val n = LocalDateTime.now()
+        stageEdited()
         _state.value = _state.value.copy(thirdDate = n.toLocalDate().format(dateFmt), thirdTime = n.toLocalTime().format(timeFmt), message = null)
     }
 
     fun extensionTomorrow() {
+        stageEdited()
         _state.value = _state.value.copy(extensionDate = LocalDate.now().plusDays(1).format(dateFmt), message = null)
     }
 
@@ -540,7 +557,25 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             return false
         }
 
-        val requests = validation.events.map { event ->
+        val eventsToSend = validation.events.filter { event ->
+            val serverField = serverPermitSnapshot?.fields?.get(event.stage.key)
+            shouldSendStageField(
+                serverValue = serverField?.field_value,
+                serverComment = serverField?.comment,
+                newValue = event.fieldValue,
+                newComment = event.comment,
+            )
+        }
+        if (eventsToSend.isEmpty()) {
+            _state.value = s.copy(
+                errors = emptyMap(),
+                message = "Заполненные данные этого этапа уже переданы на сервер",
+                success = true,
+            )
+            return true
+        }
+
+        val requests = eventsToSend.map { event ->
             EventRequest(
                 client_event_id = UUID.randomUUID().toString(),
                 device_id = deviceId,
