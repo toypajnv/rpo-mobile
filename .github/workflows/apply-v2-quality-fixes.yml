@@ -1,0 +1,162 @@
+name: Apply RPO 2.0 quality fixes
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/apply-v2-quality-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Apply quality fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          main = Path('server/app/main.py')
+          text = main.read_text(encoding='utf-8')
+          old = '''def _apply_record_filters(stmt, q: str = "", unit: str = ""):
+              query = (q or "").strip()
+              structural_unit = (unit or "").strip()
+          '''
+          new = '''def _apply_record_filters(stmt, q: str = "", unit: str = ""):
+              query = q.strip() if isinstance(q, str) else ""
+              structural_unit = unit.strip() if isinstance(unit, str) else ""
+          '''
+          if old not in text:
+              raise SystemExit('record filter marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''def _apply_event_filters(stmt, q: str = "", unit: str = ""):
+              query = (q or "").strip()
+              structural_unit = (unit or "").strip()
+          '''
+          new = '''def _apply_event_filters(stmt, q: str = "", unit: str = ""):
+              query = q.strip() if isinstance(q, str) else ""
+              structural_unit = unit.strip() if isinstance(unit, str) else ""
+          '''
+          if old not in text:
+              raise SystemExit('event filter marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    pending = [field for field in required if str(field.get("approval_status", "pending")) == "pending"]
+              approved = [field for field in required if str(field.get("approval_status", "")) == "approved"]
+          '''
+          new = '''    pending = [field for field in required if str(field.get("approval_status", "pending")) == "pending"]
+              approved = [field for field in required if str(field.get("approval_status", "")) == "approved"]
+              stop_at = _field_dt(data, "AZ")
+              resume_at = _field_dt(data, "BA")
+              stopped = bool(stop_at and (not resume_at or stop_at > resume_at))
+          '''
+          if old not in text:
+              raise SystemExit('approval summary marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    if pending:
+              status = "pending"
+              label = "Ожидает разрешения"
+              elif approved:
+          '''
+          new = '''    if stopped:
+              status = "stopped"
+              label = "Работы остановлены"
+              elif pending:
+              status = "pending"
+              label = "Ожидает разрешения"
+              elif approved:
+          '''
+          if old not in text:
+              raise SystemExit('approval state marker not found')
+          text = text.replace(old, new, 1)
+
+          text = text.replace(
+              'existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == payload.client_event_id))\n        if existing:',
+              'existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == client_event_id))\n        if existing:',
+              1,
+          )
+          main.write_text(text, encoding='utf-8')
+
+          vm = Path('android/app/src/main/java/ru/rpo/mobile/ui/RpoViewModel.kt')
+          text = vm.read_text(encoding='utf-8')
+          text = text.replace(
+              'errors = _state.value.errors - "worker" - "permit",\n                        message = "Ранее заполненные данные по НД загружены с сервера",',
+              'errors = _state.value.errors - "worker" - "permit" - "structuralUnit",\n                        message = "Ранее заполненные данные по НД загружены с сервера",',
+              1,
+          )
+          text = text.replace(
+              'serverSavedStageIds = emptySet(),\n            errors = _state.value.errors - "permit" - "worker",\n            message = null,',
+              'serverSavedStageIds = emptySet(),\n            approvalSummary = null,\n            errors = _state.value.errors - "permit" - "worker" - "structuralUnit",\n            message = null,',
+              1,
+          )
+          vm.write_text(text, encoding='utf-8')
+
+          units = Path('android/app/src/main/java/ru/rpo/mobile/ui/StructuralUnits.kt')
+          text = units.read_text(encoding='utf-8')
+          text = text.replace(
+              '"not_required" -> "Разрешение не требуется"\n    else ->',
+              '"not_required" -> "Разрешение не требуется"\n    "stopped" -> "Работы остановлены"\n    else ->',
+              1,
+          )
+          units.write_text(text, encoding='utf-8')
+
+          ui = Path('android/app/src/main/java/ru/rpo/mobile/ui/RpoApp.kt')
+          text = ui.read_text(encoding='utf-8')
+          text = text.replace(
+              'val pending = approval.status == "pending"\n    val approved = approval.status == "approved"',
+              'val pending = approval.status == "pending"\n    val approved = approval.status == "approved"\n    val stopped = approval.status == "stopped"',
+              1,
+          )
+          text = text.replace(
+              'pending -> Color(0xFFFFF4DF)\n        approved -> Color(0xFFE7F7EC)',
+              'stopped -> Color(0xFFFFEEEE)\n        pending -> Color(0xFFFFF4DF)\n        approved -> Color(0xFFE7F7EC)',
+              1,
+          )
+          text = text.replace(
+              'pending -> Orange\n        approved -> Green',
+              'stopped -> Red\n        pending -> Orange\n        approved -> Green',
+              1,
+          )
+          text = text.replace(
+              'pending -> "Передано на сервер. Ожидающих разрешения этапов: ${approval.pending_count}."\n                        approved ->',
+              'stopped -> "Работы остановлены. Для возобновления передайте этап «Возобновление работ» и дождитесь разрешения оператора."\n                        pending -> "Передано на сервер. Ожидающих разрешения этапов: ${approval.pending_count}."\n                        approved ->',
+              1,
+          )
+          ui.write_text(text, encoding='utf-8')
+
+          test = Path('android/app/src/test/java/ru/rpo/mobile/ui/StructuralUnitsTest.kt')
+          text = test.read_text(encoding='utf-8')
+          text = text.replace(
+              'assertEquals("Разрешение не требуется", approvalStatusLabel("not_required"))',
+              'assertEquals("Разрешение не требуется", approvalStatusLabel("not_required"))\n        assertEquals("Работы остановлены", approvalStatusLabel("stopped"))',
+              1,
+          )
+          test.write_text(text, encoding='utf-8')
+          PY
+
+          python -m compileall -q server/app server/tests
+          node --check server/app/static/dashboard.js
+          git diff --check
+
+      - name: Remove one-time workflow and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-v2-quality-fixes.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'RPO 2.0: harden approval status and filter compatibility'
+          git push origin HEAD:develop
