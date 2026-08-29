@@ -34,18 +34,14 @@ class ExportBatch(Base):
 
 
 class PermitRecord(Base):
-    """Canonical one-row representation of a work permit.
-
-    Raw MobileEvent rows remain as an immutable technical audit/sync log, while
-    this table is the operator-facing source of truth: one DB row per permit.
-    data_json stores the latest value/comment/timestamp for every RPO field.
-    """
+    """Canonical one-row representation of a work permit."""
     __tablename__ = "permit_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     permit_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     device_id: Mapped[str] = mapped_column(String(160), index=True)
     worker_name: Mapped[str] = mapped_column(String(180), index=True)
+    structural_unit: Mapped[str] = mapped_column(String(80), default="", index=True)
     data_json: Mapped[str] = mapped_column(Text, default="{}")
     first_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
@@ -62,12 +58,17 @@ class MobileEvent(Base):
     client_event_id: Mapped[str] = mapped_column(String(64), index=True)
     device_id: Mapped[str] = mapped_column(String(160), index=True)
     worker_name: Mapped[str] = mapped_column(String(180), index=True)
+    structural_unit: Mapped[str] = mapped_column(String(80), default="", index=True)
     permit_number: Mapped[str] = mapped_column(String(80), index=True)
     field_key: Mapped[str] = mapped_column(String(4), index=True)
     stage_label: Mapped[str] = mapped_column(String(255))
     event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     field_value: Mapped[str] = mapped_column(Text)
     comment: Mapped[str] = mapped_column(Text, default="")
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    approval_status: Mapped[str] = mapped_column(String(24), default="not_required", index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     export_batch_id: Mapped[int | None] = mapped_column(ForeignKey("export_batches.id"), nullable=True)
