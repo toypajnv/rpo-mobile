@@ -10,12 +10,12 @@ permissions:
 
 jobs:
   production-smoke:
-    name: Production health and API contract
+    name: Production health, PWA and API contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and RPO 2.0.0
+      - name: Wait for VPS autodeploy and PWA 1.0.0
         shell: bash
         run: |
           set -euo pipefail
@@ -23,20 +23,55 @@ jobs:
           for attempt in $(seq 1 36); do
             health="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null || true)"
             config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=1.0.1' 2>/dev/null || true)"
-            if [[ "$health" == *'"status":"ok"'* ]] && [[ "$config" == *'"latest_app_version":"2.0.0"'* ]]; then
-              echo "Production RPO 2.0.0 is deployed on attempt $attempt"
-              echo "$health"
-              echo "$config"
+            pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
+            if [[ "$health" == *'"status":"ok"'* ]] \
+              && [[ "$config" == *'"server_version":"0.5.1"'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.0.0"'* ]] \
+              && [[ "$pwa" == *'PWA 1.0.0'* ]]; then
+              echo "Production PWA 1.0.0 is deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for RPO 2.0.0 autodeploy: attempt $attempt/36"
+            echo "Waiting for PWA autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "RPO 2.0.0 did not become ready in time" >&2
+            echo "PWA 1.0.0 did not become ready in time" >&2
             exit 1
           fi
+
+      - name: Verify installable PWA contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 10 https://rpo-mng.ru/app/ -o /tmp/rpo-pwa.html
+          grep -F 'apple-mobile-web-app-capable' /tmp/rpo-pwa.html
+          grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
+          grep -F 'На экран Домой' /tmp/rpo-pwa.html
+
+          curl -fsS --max-time 10 https://rpo-mng.ru/app/manifest.webmanifest -o /tmp/rpo-manifest.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('/tmp/rpo-manifest.json').read_text())
+          assert manifest['start_url']=='/app/'
+          assert manifest['scope']=='/app/'
+          assert manifest['display']=='standalone'
+          assert {'192x192','512x512'} <= {x['sizes'] for x in manifest['icons']}
+          print('PWA manifest confirmed')
+          PY
+
+          curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
+          grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
+          grep -F "rpo-pwa-shell-v1.0.0" /tmp/sw.js
+
+          curl -fsS -D /tmp/icon-headers.txt --max-time 10 https://rpo-mng.ru/app/icon-180.png -o /tmp/icon.png
+          grep -Fi 'content-type: image/png' /tmp/icon-headers.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          assert Path('/tmp/icon.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+          print('iOS touch icon confirmed')
+          PY
 
       - name: Verify mobile and approval API contract is deployed
         shell: bash
@@ -75,5 +110,7 @@ jobs:
           assert cfg['latest_app_version']=='2.0.0'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          print('Old APK remains supported; latest mobile version:', cfg['latest_app_version'])
+          assert cfg['pwa_version']=='1.0.0'
+          assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
+          print('Old APK remains supported; PWA:', cfg['pwa_url'])
           PY

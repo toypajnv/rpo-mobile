@@ -7,7 +7,7 @@ import json
 import hashlib
 
 from fastapi import FastAPI, Depends, Form, HTTPException, Request, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -25,13 +25,17 @@ from .services.validation import validate_event, EventValidationError
 from .services.exporter import build_export, record_data
 from .services.mailer import send_export
 from .stages import STAGES
+from .pwa_assets import make_icon_png
 
 BASE_DIR = Path(__file__).resolve().parent
+PWA_DIR = BASE_DIR / "pwa"
 REQUIRED_DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
 DASHBOARD_STAGE_KEYS = REQUIRED_DASHBOARD_STAGE_KEYS + ("RI",)
 LATEST_MOBILE_VERSION = "2.0.0"
 MIN_SUPPORTED_MOBILE_VERSION = "1.0.1"
 MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.0.0-test/rpo-mobile-2.0.0.apk"
+PWA_VERSION = "1.0.0"
+PWA_URL = "https://rpo-mng.ru/app/"
 DEFAULT_OPERATOR_USERNAME = "Operator"
 DEFAULT_OPERATOR_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$hBSN4f5Hetyo+a4aOvCP3A$7bYB1iB2/8/sS0w1AYTNrdAg3QyVP7KdhTOP2PHCNys"
 settings.ensure_dirs()
@@ -47,9 +51,10 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.5.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.5.1", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", https_only=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/pwa-assets", StaticFiles(directory=PWA_DIR), name="pwa-assets")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
@@ -470,6 +475,48 @@ def root():
     return RedirectResponse("/dashboard", status_code=303)
 
 
+# RPO PWA ROUTES v1.0.0
+@app.get("/app", include_in_schema=False)
+def pwa_redirect():
+    return RedirectResponse("/app/", status_code=307)
+
+
+@app.get("/app/", include_in_schema=False)
+def pwa_index():
+    return FileResponse(
+        PWA_DIR / "index.html",
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/app/manifest.webmanifest", include_in_schema=False)
+def pwa_manifest():
+    return FileResponse(
+        PWA_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/app/sw.js", include_in_schema=False)
+def pwa_service_worker():
+    return FileResponse(
+        PWA_DIR / "sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/app/"},
+    )
+
+
+@app.get("/app/icon-{size}.png", include_in_schema=False)
+def pwa_icon(size: int):
+    try:
+        content = make_icon_png(size)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Иконка не найдена")
+    return Response(content=content, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     if request.session.get("operator_id"):
@@ -574,6 +621,8 @@ def mobile_config(app_version: str = Query(default="", max_length=32)):
         "maintenance": False,
         "message": message,
         "apk_url": MOBILE_APK_URL,
+        "pwa_version": PWA_VERSION,
+        "pwa_url": PWA_URL,
         "checked_at": utcnow().isoformat(),
     }
 

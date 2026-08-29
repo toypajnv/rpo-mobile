@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#073c77">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="РПО">
+  <meta name="format-detection" content="telephone=no">
+  <title>РПО — работы повышенной опасности</title>
+  <link rel="manifest" href="/app/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/app/icon-180.png">
+  <link rel="icon" sizes="192x192" href="/app/icon-192.png">
+  <link rel="stylesheet" href="/pwa-assets/app.css?v=20260829-1">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">РПО</div>
+      <div class="brand-copy"><strong>РПО</strong><span>Работы повышенной опасности</span></div>
+      <div class="no-login"><i></i> Без входа</div>
+    </header>
+
+    <main id="main" class="main-content">
+      <section id="tab-form" class="screen active" data-screen="form">
+        <div id="install-card" class="notice install-notice" hidden>
+          <div class="notice-icon">⇧</div>
+          <div><strong>Установить на iPhone</strong><p>В Safari нажмите «Поделиться» → «На экран Домой». После установки РПО открывается как отдельное приложение.</p></div>
+          <button type="button" id="install-close" class="icon-button" aria-label="Скрыть">×</button>
+        </div>
+
+        <div id="system-notice" class="notice info-notice" hidden>
+          <div class="notice-icon">●</div><div><strong id="system-title">Связь с сервером</strong><p id="system-text"></p></div>
+        </div>
+
+        <div id="queue-notice" class="notice queue-notice" hidden>
+          <div class="notice-icon">↻</div>
+          <div class="grow"><strong id="queue-title">Очередь отправки</strong><p id="queue-text"></p></div>
+          <button type="button" id="retry-queue" class="text-button">Повторить</button>
+        </div>
+
+        <div id="flash" class="notice" hidden><div class="notice-icon" id="flash-icon">✓</div><div><strong id="flash-title"></strong><p id="flash-text"></p></div></div>
+
+        <section class="card form-card">
+          <label class="field-label" for="worker-name">ФИО ответственного</label>
+          <input id="worker-name" class="control" type="text" autocomplete="name" placeholder="Например: Иванов И.И." maxlength="180">
+          <div class="field-error" id="worker-error"></div>
+
+          <label class="field-label" for="structural-unit">Структурное подразделение</label>
+          <select id="structural-unit" class="control">
+            <option value="">Выберите подразделение</option>
+            <option>ЦДПН-1</option><option>ЦДПН-2</option><option>ЦДПН-3</option><option>ЦДПН-4</option>
+            <option>ЦППН-1</option><option>ЦППН-2</option><option>ЦСДиТГ</option><option>ЦСиР</option>
+            <option>ЦТОиРТ-1</option><option>ЦТОиРТ-2</option>
+          </select>
+          <div class="field-error" id="unit-error"></div>
+
+          <label class="field-label" for="permit-number">Номер наряда-допуска</label>
+          <div class="permit-wrap">
+            <input id="permit-number" class="control" type="text" inputmode="text" autocomplete="off" placeholder="Например: СН-038364" maxlength="80" list="permit-suggestions">
+            <datalist id="permit-suggestions"></datalist>
+            <button id="permit-refresh" class="field-action" type="button" aria-label="Загрузить данные НД">↻</button>
+          </div>
+          <div class="field-hint">При точном совпадении ранее заполненные данные автоматически загружаются с сервера.</div>
+          <div class="field-error" id="permit-error"></div>
+        </section>
+
+        <section id="approval-card" class="approval-card" hidden>
+          <div class="approval-icon" id="approval-icon">◷</div>
+          <div><strong id="approval-title"></strong><p id="approval-text"></p></div>
+        </section>
+
+        <section class="card">
+          <div class="section-title"><div><strong>Этап работ</strong><span>Каждый этап передаётся отдельно</span></div><span id="saved-count" class="counter">0</span></div>
+          <select id="stage-select" class="control stage-select"></select>
+          <div class="stage-help">После отправки этапа, кроме остановки, дождитесь разрешения оператора.</div>
+        </section>
+
+        <section id="stage-fields" class="card stage-card"></section>
+
+        <button id="save-stage" class="primary-button" type="button"><span class="button-icon">✓</span><span>Сохранить этап</span></button>
+
+        <section class="card checklist">
+          <strong>Проверка заполнения</strong>
+          <div id="check-worker" class="check-line"><span>○</span> ФИО указано</div>
+          <div id="check-unit" class="check-line"><span>○</span> Подразделение выбрано</div>
+          <div id="check-permit" class="check-line"><span>○</span> Номер НД корректен</div>
+          <div id="check-stage" class="check-line"><span>○</span> Обязательные поля этапа заполнены</div>
+          <div id="check-saved" class="check-line"><span>○</span> Текущий этап сохранён</div>
+          <div class="check-line ok"><span>✓</span> Без сети данные сохраняются на iPhone</div>
+        </section>
+      </section>
+
+      <section id="tab-history" class="screen" data-screen="history">
+        <div class="page-heading"><h1>История</h1><p>Последние наряды-допуски этого устройства</p></div>
+        <div id="history-list" class="history-list"></div>
+        <button id="history-refresh" class="secondary-button" type="button">Обновить историю</button>
+      </section>
+
+      <section id="tab-help" class="screen" data-screen="help">
+        <div class="page-heading"><h1>Справка</h1><p>PWA-версия РПО для iPhone</p></div>
+        <section class="card help-card">
+          <h2>Установка на iPhone</h2>
+          <ol><li>Откройте эту страницу именно в Safari.</li><li>Нажмите кнопку «Поделиться» в Safari.</li><li>Выберите «На экран Домой».</li><li>Подтвердите «Добавить».</li></ol>
+        </section>
+        <section class="card help-card"><h2>Работа без интернета</h2><p>Если сеть пропала, заполненные события сохраняются на устройстве. РПО повторит отправку при следующем открытии приложения или после восстановления сети.</p></section>
+        <section class="card help-card"><h2>Разрешение оператора</h2><p>После передачи этапа появится статус «Ожидает разрешения». Когда оператор подтвердит этап на сервере, статус автоматически изменится на «Работы можно проводить». Остановка работ подтверждения не требует.</p></section>
+        <section class="card help-card"><h2>Версия</h2><p>PWA 1.0.0 · единая система с Android РПО 2.0.0.</p></section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Основная навигация">
+      <button type="button" class="nav-item active" data-tab="form"><span>▣</span><b>Форма</b></button>
+      <button type="button" class="nav-item" data-tab="history"><span>◷</span><b>История</b></button>
+      <button type="button" class="nav-item" data-tab="help"><span>?</span><b>Справка</b></button>
+    </nav>
+  </div>
+  <script src="/pwa-assets/app.js?v=20260829-1" defer></script>
+</body>
+</html>

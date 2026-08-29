@@ -51,8 +51,11 @@ jobs:
       - name: Compile backend Python
         run: python -m compileall -q server/app
 
-      - name: Check dashboard JavaScript syntax
-        run: node --check server/app/static/dashboard.js
+      - name: Check dashboard and PWA JavaScript syntax
+        run: |
+          node --check server/app/static/dashboard.js
+          node --check server/app/pwa/app.js
+          node --check server/app/pwa/sw.js
 
       - name: Run backend regression tests
         run: python -m unittest discover -s server/tests -v
