@@ -37,6 +37,7 @@ def build_export(records: list[PermitRecord], export_dir: str, batch_id: int) ->
     wb = Workbook()
     ws = wb.active
     ws.title = "Наряды-допуски"
+    # Keep the existing XLSX contract unchanged so the local importer is not broken.
     headers = ["НД", "Работник"] + [f"{key} — {STAGES[key]['label']}" for key in stage_keys] + ["Комментарии", "Обновлено", "ID записи"]
     ws.append(headers)
     for cell in ws[1]:
@@ -63,6 +64,8 @@ def build_export(records: list[PermitRecord], export_dir: str, batch_id: int) ->
                     "value": value,
                     "event_time": field.get("event_time", ""),
                     "comment": comment,
+                    "approval_status": field.get("approval_status", "not_required"),
+                    "approved_at": field.get("approved_at", ""),
                 }
 
         ws.append([
@@ -77,6 +80,7 @@ def build_export(records: list[PermitRecord], export_dir: str, batch_id: int) ->
             "record_id": record.id,
             "permit_number": record.permit_number,
             "worker_name": record.worker_name,
+            "structural_unit": record.structural_unit or "",
             "device_id": record.device_id,
             "updated_at": record.updated_at.isoformat(),
             "fields": normalized_fields,
@@ -97,7 +101,7 @@ def build_export(records: list[PermitRecord], export_dir: str, batch_id: int) ->
     wb.save(xlsx_path)
 
     json_path.write_text(
-        json.dumps({"version": 2, "batch_id": batch_id, "permits": json_rows}, ensure_ascii=False, indent=2),
+        json.dumps({"version": 3, "batch_id": batch_id, "permits": json_rows}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return xlsx_path, json_path

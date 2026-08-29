@@ -11,14 +11,15 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db, SessionLocal
+from .schema_upgrade import ensure_v2_columns
 from .models import Operator, MobileEvent, ExportBatch, PermitRecord
-from .schemas import EventCreate, EventOut
+from .schemas import EventCreate, EventOut, STRUCTURAL_UNITS
 from .security import hash_password, verify_password
 from .services.validation import validate_event, EventValidationError
 from .services.exporter import build_export, record_data
@@ -28,9 +29,9 @@ from .stages import STAGES
 BASE_DIR = Path(__file__).resolve().parent
 REQUIRED_DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
 DASHBOARD_STAGE_KEYS = REQUIRED_DASHBOARD_STAGE_KEYS + ("RI",)
-LATEST_MOBILE_VERSION = "1.1.6"
+LATEST_MOBILE_VERSION = "2.0.0"
 MIN_SUPPORTED_MOBILE_VERSION = "1.0.1"
-MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v1.1.6-test/rpo-mobile-1.1.6.apk"
+MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.0.0-test/rpo-mobile-2.0.0.apk"
 DEFAULT_OPERATOR_USERNAME = "Operator"
 DEFAULT_OPERATOR_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$hBSN4f5Hetyo+a4aOvCP3A$7bYB1iB2/8/sS0w1AYTNrdAg3QyVP7KdhTOP2PHCNys"
 settings.ensure_dirs()
@@ -39,13 +40,14 @@ settings.ensure_dirs()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    ensure_v2_columns()
     ensure_admin()
     ensure_default_operator()
     ensure_permit_records()
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.4.1", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="0.5.0", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax", https_only=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -103,12 +105,18 @@ def _apply_event_to_record(db: Session, event: MobileEvent) -> PermitRecord:
         "event_time": event.event_time.isoformat(),
         "comment": event.comment or "",
         "client_event_id": event.client_event_id,
+        "event_id": event.id,
+        "approval_required": bool(event.approval_required),
+        "approval_status": event.approval_status or "not_required",
+        "approved_at": event.approved_at.isoformat() if event.approved_at else "",
+        "approved_by_id": event.approved_by_id,
     }
     if record is None:
         record = PermitRecord(
             permit_number=event.permit_number,
             device_id=event.device_id,
             worker_name=event.worker_name,
+            structural_unit=event.structural_unit or "",
             data_json=json.dumps(data, ensure_ascii=False),
             first_received_at=event.received_at or utcnow(),
             updated_at=event.received_at or utcnow(),
@@ -117,6 +125,8 @@ def _apply_event_to_record(db: Session, event: MobileEvent) -> PermitRecord:
     else:
         record.device_id = event.device_id
         record.worker_name = event.worker_name
+        if event.structural_unit:
+            record.structural_unit = event.structural_unit
         record.data_json = json.dumps(data, ensure_ascii=False)
         record.updated_at = event.received_at or utcnow()
         record.exported_at = None
@@ -182,6 +192,80 @@ def _has_stage(data: dict, key: str) -> bool:
     return bool(str((data.get(key) or {}).get("field_value", "")).strip())
 
 
+
+
+def _approval_summary_from_data(data: dict) -> dict:
+    required = []
+    for key in _dashboard_stage_keys():
+        if key == "AZ":
+            continue
+        field = data.get(key) or {}
+        if field and bool(field.get("approval_required")):
+            required.append(field)
+    pending = [field for field in required if str(field.get("approval_status", "pending")) == "pending"]
+    approved = [field for field in required if str(field.get("approval_status", "")) == "approved"]
+    stop_at = _field_dt(data, "AZ")
+    resume_at = _field_dt(data, "BA")
+    stopped = bool(stop_at and (not resume_at or stop_at > resume_at))
+    approved_times = sorted(
+        [str(field.get("approved_at", "")).strip() for field in approved if str(field.get("approved_at", "")).strip()],
+        reverse=True,
+    )
+    if stopped:
+        status = "stopped"
+        label = "Работы остановлены"
+    elif pending:
+        status = "pending"
+        label = "Ожидает разрешения"
+    elif approved:
+        status = "approved"
+        label = "Работы разрешены"
+    else:
+        status = "none"
+        label = "Разрешений пока нет"
+    return {
+        "status": status,
+        "label": label,
+        "pending_count": len(pending),
+        "approved_count": len(approved),
+        "approved_at": approved_times[0] if approved_times else "",
+    }
+
+
+def _apply_record_filters(stmt, q: str = "", unit: str = ""):
+    query = q.strip() if isinstance(q, str) else ""
+    structural_unit = unit.strip() if isinstance(unit, str) else ""
+    if query:
+        pattern = f"%{query}%"
+        stmt = stmt.where(or_(
+            PermitRecord.permit_number.ilike(pattern),
+            PermitRecord.worker_name.ilike(pattern),
+            PermitRecord.structural_unit.ilike(pattern),
+            PermitRecord.data_json.ilike(pattern),
+        ))
+    if structural_unit in STRUCTURAL_UNITS:
+        stmt = stmt.where(PermitRecord.structural_unit == structural_unit)
+    return stmt
+
+
+def _apply_event_filters(stmt, q: str = "", unit: str = ""):
+    query = q.strip() if isinstance(q, str) else ""
+    structural_unit = unit.strip() if isinstance(unit, str) else ""
+    if query:
+        pattern = f"%{query}%"
+        stmt = stmt.where(or_(
+            MobileEvent.permit_number.ilike(pattern),
+            MobileEvent.worker_name.ilike(pattern),
+            MobileEvent.structural_unit.ilike(pattern),
+            MobileEvent.stage_label.ilike(pattern),
+            MobileEvent.field_value.ilike(pattern),
+            MobileEvent.comment.ilike(pattern),
+        ))
+    if structural_unit in STRUCTURAL_UNITS:
+        stmt = stmt.where(MobileEvent.structural_unit == structural_unit)
+    return stmt
+
+
 def _record_state(record: PermitRecord) -> tuple[str, str]:
     data = record_data(record)
     if _has_stage(data, "BC"):
@@ -220,6 +304,7 @@ def _work_view(record: PermitRecord) -> dict:
     total = len(required_keys) or 1
     summary, comments = _record_summary(record)
     status, status_class = _record_state(record)
+    approval = _approval_summary_from_data(data)
     stage_items = []
     for key in visible_keys:
         field = data.get(key) or {}
@@ -231,17 +316,23 @@ def _work_view(record: PermitRecord) -> dict:
             "label": STAGES[key]["label"],
             "value": value,
             "comment": str(field.get("comment", "")).strip(),
+            "event_id": int(field.get("event_id") or 0),
+            "approval_required": bool(field.get("approval_required")),
+            "approval_status": str(field.get("approval_status", "not_required")),
+            "approved_at": str(field.get("approved_at", "")),
         })
     return {
         "id": record.id,
         "updated_at": record.updated_at,
         "worker_name": record.worker_name,
+        "structural_unit": record.structural_unit or "",
         "permit_number": record.permit_number,
         "summary": summary,
         "comments": comments,
         "exported_at": record.exported_at,
         "status": status,
         "status_class": status_class,
+        "approval": approval,
         "progress": round(filled * 100 / total),
         "stage_count": filled,
         "stage_total": total,
@@ -259,11 +350,14 @@ def _preview_record(record: PermitRecord) -> dict:
             "field_value": str(src.get("field_value", "")),
             "comment": str(src.get("comment", "")),
             "event_time": str(src.get("event_time", "")),
+            "approval_status": str(src.get("approval_status", "not_required")),
         }
     return {
         "id": record.id,
         "permit_number": record.permit_number,
         "worker_name": record.worker_name,
+        "structural_unit": record.structural_unit or "",
+        "approval": _approval_summary_from_data(data),
         "updated_at": record.updated_at.isoformat(),
         "previously_exported": bool(record.exported_at),
         "exported_at": record.exported_at.isoformat() if record.exported_at else "",
@@ -404,6 +498,7 @@ def _effective_client_event_id(payload: EventCreate) -> str:
     raw = "|".join([
         payload.device_id,
         payload.worker_name,
+        payload.structural_unit or "",
         payload.permit_number,
         payload.field_key,
         payload.event_time.isoformat(),
@@ -428,12 +523,15 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
         client_event_id=client_event_id,
         device_id=payload.device_id,
         worker_name=payload.worker_name,
+        structural_unit=payload.structural_unit or "",
         permit_number=payload.permit_number,
         field_key=payload.field_key,
         stage_label=payload.stage_label.strip() or STAGES[payload.field_key]["label"],
         event_time=dt_utc(payload.event_time),
         field_value=payload.field_value,
         comment=payload.comment,
+        approval_required=payload.field_key != "AZ",
+        approval_status="pending" if payload.field_key != "AZ" else "not_required",
     )
     db.add(event)
     try:
@@ -442,7 +540,7 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError:
         db.rollback()
-        existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == payload.client_event_id))
+        existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == client_event_id))
         if existing:
             return existing
         raise
@@ -495,6 +593,10 @@ def mobile_permit_lookup(
             "field_value": str((data.get(key) or {}).get("field_value", "")),
             "event_time": str((data.get(key) or {}).get("event_time", "")),
             "comment": str((data.get(key) or {}).get("comment", "")),
+            "event_id": int((data.get(key) or {}).get("event_id") or 0),
+            "approval_required": bool((data.get(key) or {}).get("approval_required")),
+            "approval_status": str((data.get(key) or {}).get("approval_status", "not_required")),
+            "approved_at": str((data.get(key) or {}).get("approved_at", "")) or None,
         }
         for key in _dashboard_stage_keys()
         if data.get(key)
@@ -502,6 +604,8 @@ def mobile_permit_lookup(
     return {
         "permit_number": record.permit_number,
         "worker_name": record.worker_name,
+        "structural_unit": record.structural_unit or "",
+        "approval": _approval_summary_from_data(data),
         "updated_at": record.updated_at.isoformat(),
         "fields": fields,
     }
@@ -534,15 +638,26 @@ def mobile_history(device_id: str = Query(min_length=2), limit: int = Query(30, 
             values.append(f"{STAGES[key]['label']}: {event.field_value}")
             if (event.comment or "").strip():
                 comments.append(f"{STAGES[key]['label']}: {event.comment.strip()}")
+        latest_required = [event for event in by_key.values() if event.approval_required]
+        history_approval = (
+            "pending" if any(event.approval_status == "pending" for event in latest_required)
+            else "approved" if latest_required
+            else "not_required"
+        )
+        approved_times = [event.approved_at for event in latest_required if event.approved_at]
         result.append({
             "id": latest.id,
             "worker_name": latest.worker_name,
+            "structural_unit": latest.structural_unit or "",
             "permit_number": latest.permit_number,
             "field_key": "НД",
             "stage_label": f"Наряд-допуск · {len(by_key)} этап(ов)",
             "event_time": latest.event_time,
             "field_value": "\n".join(values),
             "comment": "\n".join(comments),
+            "approval_required": bool(latest_required),
+            "approval_status": history_approval,
+            "approved_at": max(approved_times) if approved_times else None,
             "received_at": latest.received_at,
             "exported_at": latest.exported_at,
         })
@@ -555,6 +670,7 @@ def dashboard_context(db: Session):
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     received_today = db.scalar(select(func.count()).select_from(PermitRecord).where(PermitRecord.updated_at >= day_start)) or 0
     pending = db.scalar(select(func.count()).select_from(PermitRecord).where(PermitRecord.exported_at.is_(None))) or 0
+    pending_approvals = db.scalar(select(func.count()).select_from(MobileEvent).where(MobileEvent.approval_status == "pending")) or 0
     active_since = now - timedelta(hours=12)
     active_workers = db.scalar(select(func.count(func.distinct(PermitRecord.worker_name))).where(PermitRecord.updated_at >= active_since)) or 0
     last_export = db.scalar(select(ExportBatch).order_by(ExportBatch.created_at.desc()).limit(1))
@@ -568,11 +684,15 @@ def dashboard_context(db: Session):
             "id": event.id,
             "received_at": event.received_at,
             "worker_name": event.worker_name,
+            "structural_unit": event.structural_unit or "",
             "permit_number": event.permit_number,
             "field_key": event.field_key,
             "stage_label": event.stage_label,
             "field_value": event.field_value,
             "comment": event.comment,
+            "approval_required": event.approval_required,
+            "approval_status": event.approval_status,
+            "approved_at": event.approved_at,
             "exported_at": event.exported_at,
         }
         for event in transmissions_raw
@@ -595,6 +715,7 @@ def dashboard_context(db: Session):
     return dict(
         received_today=received_today,
         pending=pending,
+        pending_approvals=pending_approvals,
         active_workers=active_workers,
         last_export=last_export,
         works=works,
@@ -603,6 +724,7 @@ def dashboard_context(db: Session):
         analytics=analytics,
         settings_view=settings_view,
         users=users,
+        structural_units=STRUCTURAL_UNITS,
     )
 
 
@@ -621,8 +743,11 @@ def operator_events(
     operator: Operator = Depends(current_operator),
     db: Session = Depends(get_db),
     limit: int = Query(100, ge=1, le=500),
+    q: str = Query(default="", max_length=120),
+    unit: str = Query(default="", max_length=80),
 ):
-    records = list(db.scalars(select(PermitRecord).order_by(PermitRecord.updated_at.desc()).limit(limit)))
+    stmt = _apply_record_filters(select(PermitRecord), q, unit).order_by(PermitRecord.updated_at.desc()).limit(limit)
+    records = list(db.scalars(stmt))
     result = []
     for record in records:
         item = _work_view(record)
@@ -630,12 +755,14 @@ def operator_events(
             "id": item["id"],
             "updated_at": item["updated_at"].isoformat(),
             "worker_name": item["worker_name"],
+            "structural_unit": item["structural_unit"],
             "permit_number": item["permit_number"],
             "summary": item["summary"],
             "comments": item["comments"],
             "exported": bool(item["exported_at"]),
             "status": item["status"],
             "status_class": item["status_class"],
+            "approval": item["approval"],
             "progress": item["progress"],
             "stage_count": item["stage_count"],
             "stage_total": item["stage_total"],
@@ -650,26 +777,103 @@ def operator_transmissions(
     operator: Operator = Depends(current_operator),
     db: Session = Depends(get_db),
     limit: int = Query(200, ge=1, le=500),
+    q: str = Query(default="", max_length=120),
+    unit: str = Query(default="", max_length=80),
 ):
-    events = list(db.scalars(
-        select(MobileEvent)
-        .order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc())
-        .limit(limit)
-    ))
+    stmt = _apply_event_filters(select(MobileEvent), q, unit).order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc()).limit(limit)
+    events = list(db.scalars(stmt))
     return [
         {
             "id": event.id,
             "received_at": event.received_at.isoformat(),
             "worker_name": event.worker_name,
+            "structural_unit": event.structural_unit or "",
             "permit_number": event.permit_number,
             "field_key": event.field_key,
             "stage_label": event.stage_label,
             "field_value": event.field_value,
             "comment": event.comment or "",
+            "approval_required": event.approval_required,
+            "approval_status": event.approval_status,
+            "approved_at": event.approved_at.isoformat() if event.approved_at else "",
             "exported": bool(event.exported_at),
         }
         for event in events
     ]
+
+
+@app.post("/api/operator/events/{event_id}/approve")
+def approve_mobile_event(
+    event_id: int,
+    operator: Operator = Depends(current_operator),
+    db: Session = Depends(get_db),
+):
+    event = db.get(MobileEvent, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Передача не найдена")
+    if not event.approval_required or event.field_key == "AZ":
+        return {
+            "status": "not_required",
+            "event_id": event.id,
+            "permit_number": event.permit_number,
+            "message": "Для остановки работ разрешение оператора не требуется",
+        }
+    if event.approval_status == "approved":
+        return {
+            "status": "approved",
+            "event_id": event.id,
+            "permit_number": event.permit_number,
+            "approved_at": event.approved_at.isoformat() if event.approved_at else "",
+        }
+
+    approved_at = utcnow()
+    event.approval_status = "approved"
+    event.approved_at = approved_at
+    event.approved_by_id = operator.id
+
+    record = db.scalar(select(PermitRecord).where(PermitRecord.permit_number == event.permit_number))
+    if record:
+        data = record_data(record)
+        current = data.get(event.field_key) if isinstance(data.get(event.field_key), dict) else None
+        if current and current.get("client_event_id") == event.client_event_id:
+            current["approval_required"] = True
+            current["approval_status"] = "approved"
+            current["approved_at"] = approved_at.isoformat()
+            current["approved_by_id"] = operator.id
+            record.data_json = json.dumps(data, ensure_ascii=False)
+            record.updated_at = approved_at
+    db.commit()
+    return {
+        "status": "approved",
+        "event_id": event.id,
+        "permit_number": event.permit_number,
+        "field_key": event.field_key,
+        "approved_at": approved_at.isoformat(),
+        "approved_by": operator.username,
+    }
+
+
+@app.get("/api/operator/analytics")
+def operator_analytics(
+    operator: Operator = Depends(current_operator),
+    db: Session = Depends(get_db),
+    q: str = Query(default="", max_length=120),
+    unit: str = Query(default="", max_length=80),
+):
+    now = utcnow()
+    records = list(db.scalars(_apply_record_filters(select(PermitRecord), q, unit).order_by(PermitRecord.updated_at.desc())))
+    permit_numbers = [record.permit_number for record in records]
+    if permit_numbers:
+        raw_events = list(db.scalars(
+            select(MobileEvent)
+            .where(MobileEvent.received_at >= now - timedelta(days=7), MobileEvent.permit_number.in_(permit_numbers))
+            .order_by(MobileEvent.received_at.asc())
+        ))
+    else:
+        raw_events = []
+    result = _analytics_context(records, raw_events, now)
+    result["pending_approvals"] = sum(_approval_summary_from_data(record_data(record))["pending_count"] for record in records)
+    return result
 
 
 @app.delete("/api/operator/permits/{record_id}")
@@ -718,13 +922,13 @@ def export_preview(
     period_to: str,
     operator: Operator = Depends(current_operator),
     db: Session = Depends(get_db),
+    q: str = Query(default="", max_length=120),
+    unit: str = Query(default="", max_length=80),
 ):
     start, end = _parse_period(period_from, period_to)
-    records = list(db.scalars(
-        select(PermitRecord)
-        .where(PermitRecord.updated_at >= start, PermitRecord.updated_at <= end)
-        .order_by(PermitRecord.updated_at.asc())
-    ))
+    stmt = select(PermitRecord).where(PermitRecord.updated_at >= start, PermitRecord.updated_at <= end)
+    stmt = _apply_record_filters(stmt, q, unit).order_by(PermitRecord.updated_at.asc())
+    records = list(db.scalars(stmt))
     return {
         "records": [_preview_record(record) for record in records],
         "stage_keys": _dashboard_stage_keys(),

@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and RPO 1.1.6
+      - name: Wait for VPS autodeploy and RPO 2.0.0
         shell: bash
         run: |
           set -euo pipefail
@@ -23,22 +23,22 @@ jobs:
           for attempt in $(seq 1 36); do
             health="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null || true)"
             config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=1.0.1' 2>/dev/null || true)"
-            if [[ "$health" == *'"status":"ok"'* ]] && [[ "$config" == *'"latest_app_version":"1.1.6"'* ]]; then
-              echo "Production RPO 1.1.6 is deployed on attempt $attempt"
+            if [[ "$health" == *'"status":"ok"'* ]] && [[ "$config" == *'"latest_app_version":"2.0.0"'* ]]; then
+              echo "Production RPO 2.0.0 is deployed on attempt $attempt"
               echo "$health"
               echo "$config"
               ok=1
               break
             fi
-            echo "Waiting for RPO 1.1.6 autodeploy: attempt $attempt/36"
+            echo "Waiting for RPO 2.0.0 autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "RPO 1.1.6 did not become ready in time" >&2
+            echo "RPO 2.0.0 did not become ready in time" >&2
             exit 1
           fi
 
-      - name: Verify mobile API contract is deployed
+      - name: Verify mobile and approval API contract is deployed
         shell: bash
         run: |
           set -euo pipefail
@@ -49,7 +49,12 @@ jobs:
 
           spec = json.loads(Path('/tmp/rpo-openapi.json').read_text())
           paths = spec.get('paths', {})
-          required = ['/api/mobile/permit', '/api/mobile/config']
+          required = [
+              '/api/mobile/permit',
+              '/api/mobile/config',
+              '/api/operator/events/{event_id}/approve',
+              '/api/operator/analytics',
+          ]
           for route in required:
               if route not in paths:
                   raise SystemExit(f'Missing deployed API route: {route}')
@@ -67,7 +72,7 @@ jobs:
 
           cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
           assert cfg['status']=='ok'
-          assert cfg['latest_app_version']=='1.1.6'
+          assert cfg['latest_app_version']=='2.0.0'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
           print('Old APK remains supported; latest mobile version:', cfg['latest_app_version'])

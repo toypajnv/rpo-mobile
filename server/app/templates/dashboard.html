@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>РПО Сервер</title><link rel="stylesheet" href="/static/app.css?v=20260821-1"></head>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>РПО Сервер</title><link rel="stylesheet" href="/static/app.css?v=20260829-2"></head>
 <body class="app-body">
 <aside class="sidebar">
   <div class="side-brand"><span>🏗️</span><div><b>РПО Сервер</b><small>Контроль этапов работ</small></div></div>
@@ -16,12 +16,18 @@
 </aside>
 <main class="main">
 <header><div><h1 id="page-title">Панель оператора</h1><p id="page-subtitle">Сводка по нарядам-допускам</p></div><div class="operator"><i></i><span>{{ operator.username }}</span><form method="post" action="/logout"><button class="link-button">Выйти</button></form></div></header>
+<div class="global-filter" id="global-filter" hidden>
+  <label class="search-field">⌕ <input id="global-search" type="search" placeholder="НД, ФИО, этап, значение или комментарий"></label>
+  <label class="unit-filter">Подразделение<select id="global-unit"><option value="">Все подразделения</option>{% for unit in structural_units %}<option value="{{ unit }}">{{ unit }}</option>{% endfor %}</select></label>
+  <button type="button" class="filter-reset" id="global-filter-reset">Сбросить</button>
+</div>
 {% if request.query_params.get('export') == 'ok' %}<div class="alert success">Выгрузка отправлена одним письмом. Данные сохранены на сервере.</div>{% endif %}
 
 <section class="tab-section" id="tab-home" data-tab="home">
   <section class="stats">
    <article><span class="round blue">↓</span><div><small>Изменено сегодня</small><strong>{{ received_today }}</strong><em>нарядов-допусков</em></div></article>
    <article><span class="round orange">!</span><div><small>Не выгружено</small><strong>{{ pending }}</strong><em>нарядов-допусков</em></div></article>
+   <article><span class="round orange">✓</span><div><small>Ожидают разрешения</small><strong>{{ pending_approvals }}</strong><em>этапов работ</em></div></article>
    <article><span class="round green">♟</span><div><small>Активные работники</small><strong>{{ active_workers }}</strong><em>за 12 часов</em></div></article>
    <article><span class="round violet">◷</span><div><small>Последняя выгрузка</small><strong class="small-strong">{% if last_export %}{{ last_export.created_at.astimezone().strftime('%d.%m.%Y %H:%M') }}{% else %}—{% endif %}</strong><em>{% if last_export %}{{ last_export.recipient }}{% else %}ещё не было{% endif %}</em></div></article>
   </section>
@@ -48,8 +54,8 @@
 <section class="tab-section" id="tab-transmissions" data-tab="transmissions" hidden>
   <article class="panel">
     <div class="panel-title"><div><h2>Переданные данные</h2><p class="muted panel-note">Журнал фактических сообщений, пришедших с мобильных устройств. Здесь каждый этап показывается отдельно.</p></div><span class="online"><i></i> Онлайн</span></div>
-    <div class="table-wrap tall"><table><thead><tr><th>Получено</th><th>Работник</th><th>НД</th><th>Этап</th><th>Переданное значение</th><th>Комментарий</th><th>Выгрузка</th></tr></thead><tbody id="transmissions-body">
-      {% for e in transmissions %}<tr><td>{{ e.received_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><b>{{ e.worker_name }}</b></td><td><b>{{ e.permit_number }}</b></td><td><span class="stage-code">{{ e.field_key }}</span> {{ e.stage_label }}</td><td>{{ e.field_value }}</td><td class="wrap-cell">{{ e.comment or '—' }}</td><td>{% if e.exported_at %}<span class="badge done">Выгружено</span>{% else %}<span class="badge pending">Ожидает</span>{% endif %}</td></tr>{% endfor %}
+    <div class="table-wrap tall"><table><thead><tr><th>Получено</th><th>Подразделение</th><th>Работник</th><th>НД</th><th>Этап</th><th>Переданное значение</th><th>Комментарий</th><th>Разрешение</th><th>Действие</th></tr></thead><tbody id="transmissions-body">
+      {% for e in transmissions %}<tr><td>{{ e.received_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><span class="unit-pill">{{ e.structural_unit or '—' }}</span></td><td><b>{{ e.worker_name }}</b></td><td><b>{{ e.permit_number }}</b></td><td><span class="stage-code">{{ e.field_key }}</span> {{ e.stage_label }}</td><td>{{ e.field_value }}</td><td class="wrap-cell">{{ e.comment or '—' }}</td><td>{% if not e.approval_required %}<span class="badge neutral">Не требуется</span>{% elif e.approval_status == 'approved' %}<span class="badge done">Разрешено</span>{% else %}<span class="badge approval-wait">Ожидает</span>{% endif %}</td><td>{% if e.approval_required and e.approval_status != 'approved' %}<button type="button" class="approve-button" data-approve-event="{{ e.id }}">Разрешить</button>{% else %}—{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
   </article>
 </section>
@@ -57,30 +63,30 @@
 <section class="tab-section" id="tab-works" data-tab="works" hidden>
   <article class="panel">
     <div class="panel-title"><div><h2>Работы</h2><p class="muted panel-note">Одна строка — один наряд-допуск. Подробности по этапам раскрываются по клику.</p></div><span class="online"><i></i> Онлайн</span></div>
-    <div class="table-wrap tall"><table><thead><tr><th>Обновлено</th><th>НД</th><th>Работник</th><th>Текущее состояние</th><th>Прогресс</th><th>Этапы</th><th>Выгрузка</th><th>Действия</th></tr></thead><tbody id="works-body" data-can-delete="{{ 'true' if is_admin else 'false' }}">
-      {% for e in works %}<tr><td>{{ e.updated_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><b>{{ e.permit_number }}</b></td><td><b>{{ e.worker_name }}</b></td><td><span class="work-state {{ e.status_class }}">{{ e.status }}</span></td><td><div class="progress"><span style="width:{{ e.progress }}%"></span></div><small>{{ e.stage_count }} из {{ e.stage_total }}</small></td><td class="works-stage-cell"><details class="stage-details"><summary><span>{{ e.stage_count }} из {{ e.stage_total }} этапов</span><small>Показать детали</small></summary><div class="stage-detail-list">{% for s in e.stage_items %}<div class="stage-detail-line"><span><b>{{ s.label }}</b><small>{{ s.key }}</small></span><strong>{{ s.value }}</strong>{% if s.comment %}<em>{{ s.comment }}</em>{% endif %}</div>{% endfor %}</div></details></td><td>{% if e.exported_at %}<span class="badge done">Выгружено</span>{% else %}<span class="badge pending">Не выгружено</span>{% endif %}</td></tr>{% endfor %}
+    <div class="table-wrap tall"><table><thead><tr><th>Обновлено</th><th>Подразделение</th><th>НД</th><th>Работник</th><th>Текущее состояние</th><th>Разрешение</th><th>Прогресс</th><th>Этапы</th><th>Выгрузка</th><th>Действия</th></tr></thead><tbody id="works-body" data-can-delete="{{ 'true' if is_admin else 'false' }}">
+      {% for e in works %}<tr><td>{{ e.updated_at.astimezone().strftime('%d.%m.%Y %H:%M:%S') }}</td><td><span class="unit-pill">{{ e.structural_unit or '—' }}</span></td><td><b>{{ e.permit_number }}</b></td><td><b>{{ e.worker_name }}</b></td><td><span class="work-state {{ e.status_class }}">{{ e.status }}</span></td><td><span class="badge {% if e.approval.status == 'approved' %}done{% elif e.approval.status == 'pending' %}approval-wait{% else %}neutral{% endif %}">{{ e.approval.label }}</span></td><td><div class="progress"><span style="width:{{ e.progress }}%"></span></div><small>{{ e.stage_count }} из {{ e.stage_total }}</small></td><td class="works-stage-cell"><details class="stage-details"><summary><span>{{ e.stage_count }} из {{ e.stage_total }} этапов</span><small>Показать детали</small></summary><div class="stage-detail-list">{% for s in e.stage_items %}<div class="stage-detail-line"><span><b>{{ s.label }}</b><small>{{ s.key }}</small></span><strong>{{ s.value }}</strong>{% if s.comment %}<em>{{ s.comment }}</em>{% endif %}</div>{% endfor %}</div></details></td><td>{% if e.exported_at %}<span class="badge done">Выгружено</span>{% else %}<span class="badge pending">Не выгружено</span>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
   </article>
 </section>
 
 <section class="tab-section" id="tab-analytics" data-tab="analytics" hidden>
   <section class="analytics-cards">
-    <article><small>Всего НД</small><strong>{{ analytics.total }}</strong><span>в базе</span></article>
-    <article><small>Сейчас в работе</small><strong>{{ analytics.active }}</strong><span>включая продлённые</span></article>
-    <article><small>Остановлено</small><strong>{{ analytics.stopped }}</strong><span>требуют внимания</span></article>
-    <article><small>Завершено</small><strong>{{ analytics.completed }}</strong><span>по этапу окончания</span></article>
-    <article><small>Продлений</small><strong>{{ analytics.extended }}</strong><span>НД с продлением</span></article>
-    <article><small>Среднее время работ</small><strong>{{ analytics.avg_completion_label }}</strong><span>от начала до окончания</span></article>
+    <article><small>Всего НД</small><strong id="analytics-total">{{ analytics.total }}</strong><span>в базе</span></article>
+    <article><small>Сейчас в работе</small><strong id="analytics-active">{{ analytics.active }}</strong><span>включая продлённые</span></article>
+    <article><small>Остановлено</small><strong id="analytics-stopped">{{ analytics.stopped }}</strong><span>требуют внимания</span></article>
+    <article><small>Завершено</small><strong id="analytics-completed">{{ analytics.completed }}</strong><span>по этапу окончания</span></article>
+    <article><small>Продлений</small><strong id="analytics-extended">{{ analytics.extended }}</strong><span>НД с продлением</span></article>
+    <article><small>Среднее время работ</small><strong id="analytics-average">{{ analytics.avg_completion_label }}</strong><span>от начала до окончания</span></article>
   </section>
   <section class="analytics-grid">
     <article class="panel"><div class="panel-title"><div><h2>Активность за 7 дней</h2><p class="muted panel-note">Количество сообщений от мобильных устройств</p></div></div>
-      <div class="bar-chart">{% for p in analytics.activity_days %}<div class="bar-row"><span>{{ p.label }}</span><div><i style="width:{{ p.pct }}%"></i></div><b>{{ p.count }}</b></div>{% endfor %}</div>
+      <div class="bar-chart" id="analytics-activity">{% for p in analytics.activity_days %}<div class="bar-row"><span>{{ p.label }}</span><div><i style="width:{{ p.pct }}%"></i></div><b>{{ p.count }}</b></div>{% endfor %}</div>
     </article>
     <article class="panel"><div class="panel-title"><div><h2>Заполнение этапов</h2><p class="muted panel-note">Доля НД, в которых присутствует основной этап</p></div></div>
-      <div class="bar-chart stage-chart">{% for p in analytics.stage_progress %}<div class="bar-row"><span title="{{ p.key }}">{{ p.label }}</span><div><i style="width:{{ p.pct }}%"></i></div><b>{{ p.count }}</b></div>{% else %}<p class="muted">Пока нет данных</p>{% endfor %}</div>
+      <div class="bar-chart stage-chart" id="analytics-stages">{% for p in analytics.stage_progress %}<div class="bar-row"><span title="{{ p.key }}">{{ p.label }}</span><div><i style="width:{{ p.pct }}%"></i></div><b>{{ p.count }}</b></div>{% else %}<p class="muted">Пока нет данных</p>{% endfor %}</div>
     </article>
     <article class="panel"><div class="panel-title"><div><h2>Работники по количеству НД</h2><p class="muted panel-note">Топ-5 за весь период</p></div></div>
-      <div class="leader-list">{% for p in analytics.top_workers %}<div><span><b>{{ loop.index }}</b>{{ p.name }}</span><strong>{{ p.count }}</strong></div>{% else %}<p class="muted">Пока нет данных</p>{% endfor %}</div>
+      <div class="leader-list" id="analytics-workers">{% for p in analytics.top_workers %}<div><span><b>{{ loop.index }}</b>{{ p.name }}</span><strong>{{ p.count }}</strong></div>{% else %}<p class="muted">Пока нет данных</p>{% endfor %}</div>
     </article>
     <article class="panel"><div class="panel-title"><div><h2>Что показывает аналитика</h2><p class="muted panel-note">Показатели для оперативного контроля</p></div></div>
       <div class="insight-list"><p><b>Остановленные работы</b><span>Помогают быстро увидеть НД, где остановка произошла позже последнего возобновления.</span></p><p><b>Продления</b><span>Показывают нагрузку на продление нарядов и возможные затяжные работы.</span></p><p><b>Активность</b><span>Позволяет увидеть дни и смены с повышенным количеством событий.</span></p></div>
@@ -152,4 +158,4 @@
     </form>
   </section>
 </div>
-<script src="/static/dashboard.js?v=20260821-1"></script></body></html>
+<script src="/static/dashboard.js?v=20260829-2"></script></body></html>

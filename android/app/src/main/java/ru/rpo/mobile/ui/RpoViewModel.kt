@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import ru.rpo.mobile.data.EventRequest
 import ru.rpo.mobile.data.EventResponse
 import ru.rpo.mobile.data.PermitSnapshot
+import ru.rpo.mobile.data.PermitApprovalSummary
 import ru.rpo.mobile.data.MobileConfig
 import ru.rpo.mobile.data.NetworkState
 import ru.rpo.mobile.data.PendingEventStore
@@ -40,10 +41,12 @@ data class PermitMemory(
     val permitNumber: String,
     val workerName: String,
     val lastUsedAt: Long,
+    val structuralUnit: String? = null,
 )
 
 data class FormState(
     val workerName: String = "",
+    val structuralUnit: String = "",
     val permitNumber: String = "",
     val stage: Stage = stages.first(),
     val primaryDate: String = "",
@@ -64,6 +67,7 @@ data class FormState(
     val pendingCount: Int = 0,
     val failedCount: Int = 0,
     val serverSavedStageIds: Set<String> = emptySet(),
+    val approvalSummary: PermitApprovalSummary? = null,
 )
 
 private data class PendingEvent(
@@ -85,11 +89,13 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     private val queueStore = PendingEventStore(app)
     private val connectivityManager = app.getSystemService(ConnectivityManager::class.java)
     private var permitLookupJob: Job? = null
+    private var approvalPollingJob: Job? = null
     private var serverPermitSnapshot: PermitSnapshot? = null
 
     private val _state = MutableStateFlow(
         FormState(
             workerName = prefs.getString("worker_name", "") ?: "",
+            structuralUnit = prefs.getString("structural_unit", "") ?: "",
             pendingCount = queueStore.pendingCount(),
             failedCount = queueStore.failedCount(),
         )
@@ -127,6 +133,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+        approvalPollingJob?.cancel()
         super.onCleared()
     }
 
@@ -140,12 +147,12 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun rememberPermit(permitNumber: String, workerName: String) {
+    private fun rememberPermit(permitNumber: String, workerName: String, structuralUnit: String) {
         val normalized = permitNumber.trim().uppercase()
         val updated = _permitMemories.value
             .filterNot { it.permitNumber.equals(normalized, ignoreCase = true) }
             .toMutableList()
-        updated.add(0, PermitMemory(normalized, workerName.trim(), System.currentTimeMillis()))
+        updated.add(0, PermitMemory(normalized, workerName.trim(), System.currentTimeMillis(), structuralUnit))
         val limited = updated.take(30)
         prefs.edit().putString("permit_memories", gson.toJson(limited)).apply()
         _permitMemories.value = limited
@@ -163,7 +170,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         stopReason = "",
         comment = "",
         replacements = listOf(ReplacementEntry()),
-        errors = base.errors.filterKeys { it == "worker" || it == "permit" },
+        errors = base.errors.filterKeys { it == "worker" || it == "permit" || it == "structuralUnit" },
         message = null,
     )
 
@@ -198,6 +205,36 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+
+    private suspend fun refreshApprovalStatus(permitNumber: String) {
+        if (!NetworkState.isConnected(application)) return
+        try {
+            val response = ru.rpo.mobile.data.ApiFactory.api.permit(permitNumber)
+            if (!response.isSuccessful) return
+            val snapshot = response.body() ?: return
+            if (_state.value.permitNumber.trim().uppercase() != permitNumber) return
+            serverPermitSnapshot = snapshot
+            val unit = _state.value.structuralUnit.ifBlank { snapshot.structural_unit }
+            _state.value = _state.value.copy(
+                structuralUnit = unit,
+                approvalSummary = snapshot.approval,
+            )
+            if (unit.isNotBlank()) prefs.edit().putString("structural_unit", unit).apply()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun startApprovalPolling(permitNumber: String) {
+        approvalPollingJob?.cancel()
+        if (!permitRegex.matches(permitNumber)) return
+        approvalPollingJob = viewModelScope.launch {
+            while (_state.value.permitNumber.trim().uppercase() == permitNumber) {
+                delay(8000)
+                refreshApprovalStatus(permitNumber)
+            }
+        }
+    }
+
     private fun schedulePermitLookup(permitNumber: String, immediate: Boolean = false) {
         permitLookupJob?.cancel()
         val normalized = permitNumber.trim().uppercase()
@@ -217,18 +254,23 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                     serverPermitSnapshot = snapshot
                     val filledKeys = snapshot.fields.filterValues { it.field_value.isNotBlank() }.keys
                     val worker = snapshot.worker_name.ifBlank { _state.value.workerName }
+                    val unit = snapshot.structural_unit.ifBlank { _state.value.structuralUnit }
                     val base = _state.value.copy(
                         workerName = worker,
+                        structuralUnit = unit,
+                        approvalSummary = snapshot.approval,
                         serverSavedStageIds = savedStageIdsForFieldKeys(filledKeys),
-                        errors = _state.value.errors - "worker" - "permit",
+                        errors = _state.value.errors - "worker" - "permit" - "structuralUnit",
                         message = "Ранее заполненные данные по НД загружены с сервера",
                         success = true,
                     )
                     _state.value = applySnapshotToStage(base, base.stage, snapshot)
                     if (worker.isNotBlank()) prefs.edit().putString("worker_name", worker).apply()
+                    if (unit.isNotBlank()) prefs.edit().putString("structural_unit", unit).apply()
+                    startApprovalPolling(normalized)
                 } else if (response.code() == 404) {
                     serverPermitSnapshot = null
-                    _state.value = _state.value.copy(serverSavedStageIds = emptySet())
+                    _state.value = _state.value.copy(serverSavedStageIds = emptySet(), approvalSummary = null)
                 }
             } catch (_: Exception) {
                 // Работа без сети остаётся доступной; серверное автозаполнение повторится при следующем вводе номера.
@@ -238,15 +280,19 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectPermit(memory: PermitMemory) {
         val worker = memory.workerName.ifBlank { _state.value.workerName }
+        val unit = memory.structuralUnit.orEmpty().ifBlank { _state.value.structuralUnit }
         _state.value = blankStageFields(_state.value).copy(
             permitNumber = memory.permitNumber,
             workerName = worker,
+            structuralUnit = unit,
             serverSavedStageIds = emptySet(),
-            errors = _state.value.errors - "permit" - "worker",
+            approvalSummary = null,
+            errors = _state.value.errors - "permit" - "worker" - "structuralUnit",
             message = null,
         )
         serverPermitSnapshot = null
         if (worker.isNotBlank()) prefs.edit().putString("worker_name", worker).apply()
+        if (unit.isNotBlank()) prefs.edit().putString("structural_unit", unit).apply()
         schedulePermitLookup(memory.permitNumber, immediate = true)
     }
 
@@ -255,7 +301,18 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("worker_name", v.take(180)).apply()
     }
 
+    fun updateStructuralUnit(v: String) {
+        val normalized = if (v in structuralUnits) v else ""
+        _state.value = _state.value.copy(
+            structuralUnit = normalized,
+            errors = _state.value.errors - "structuralUnit",
+            message = null,
+        )
+        prefs.edit().putString("structural_unit", normalized).apply()
+    }
+
     fun updatePermit(v: String) {
+        approvalPollingJob?.cancel()
         val value = v.uppercase().take(80)
         val hasInvalidChar = value.any { !permitCharRegex.matches(it.toString()) }
         val errors = _state.value.errors.toMutableMap()
@@ -266,6 +323,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             permitNumber = value,
             errors = errors,
             serverSavedStageIds = emptySet(),
+            approvalSummary = null,
             message = null,
         )
         schedulePermitLookup(value)
@@ -342,6 +400,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         val events = mutableListOf<PendingEvent>()
 
         if (s.workerName.trim().length < 3) errors["worker"] = "Укажите ФИО работника"
+        structuralUnitError(s.structuralUnit)?.let { errors["structuralUnit"] = it }
         val permit = s.permitNumber.trim().uppercase()
         if (!permitRegex.matches(permit)) {
             errors["permit"] = if (permit.length < 3) "Введите номер наряда-допуска" else "Номер НД содержит недопустимые символы"
@@ -451,10 +510,15 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             val message = when {
                 result.failed > 0 -> "Часть данных сохранена локально, но ${result.failed} записей сервер отклонил. Их можно повторить после проверки."
                 result.pending > 0 -> "Данные сохранены. ${result.pending} записей остаются в очереди и будут отправлены автоматически."
-                result.sent > 0 -> "Данные переданы на сервер. Отправлено записей: ${result.sent}."
+                result.sent > 0 -> "Данные переданы на сервер. Для этапов, кроме остановки, дождитесь статуса «Работы можно проводить»."
                 else -> "Очередь синхронизирована."
             }
             _state.value = _state.value.copy(message = message, success = result.failed == 0, sending = false)
+        }
+        val permit = _state.value.permitNumber.trim().uppercase()
+        if (result.sent > 0 && permitRegex.matches(permit)) {
+            refreshApprovalStatus(permit)
+            startApprovalPolling(permit)
         }
     }
 
@@ -481,6 +545,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                 client_event_id = UUID.randomUUID().toString(),
                 device_id = deviceId,
                 worker_name = s.workerName.trim(),
+                structural_unit = s.structuralUnit,
                 permit_number = s.permitNumber.trim().uppercase(),
                 field_key = event.stage.key,
                 stage_label = event.stage.title,
@@ -491,7 +556,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         queueStore.enqueueAll(requests)
-        rememberPermit(s.permitNumber, s.workerName)
+        rememberPermit(s.permitNumber, s.workerName, s.structuralUnit)
         refreshQueueCounts()
         PendingSyncScheduler.schedule(application)
 
