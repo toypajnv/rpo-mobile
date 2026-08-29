@@ -15,6 +15,7 @@ class DashboardWidthFitTests(unittest.TestCase):
         self.assertIn("#tab-transmissions .wrap-cell,#tab-works .works-stage-cell{min-width:0}", css)
         self.assertIn("#tab-works .stage-detail-line{grid-template-columns:1fr", css)
         self.assertIn("/static/app.css?v=20260829-3", html)
+        self.assertNotIn("/static/app.css?v=20260829-2", html)
 
 
 if __name__ == "__main__":
