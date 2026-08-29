@@ -1,0 +1,80 @@
+name: Apply PWA server routes
+
+on:
+  push:
+    branches: [pwa-ios]
+    paths:
+      - '.github/workflows/apply-pwa-routes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pwa-ios
+          fetch-depth: 0
+      - name: Add PWA routes to FastAPI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('server/app/main.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '# RPO PWA ROUTES v1.0.0'
+          if marker in text:
+              raise SystemExit('PWA routes already applied')
+
+          text = text.replace(
+              'from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse',
+              'from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse, Response',
+          )
+          text = text.replace(
+              'from .stages import STAGES\n',
+              'from .stages import STAGES\nfrom .pwa_assets import make_icon_png\n',
+          )
+          text = text.replace(
+              'BASE_DIR = Path(__file__).resolve().parent\n',
+              'BASE_DIR = Path(__file__).resolve().parent\nPWA_DIR = BASE_DIR / "pwa"\n',
+          )
+          text = text.replace(
+              'MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.0.0-test/rpo-mobile-2.0.0.apk"\n',
+              'MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.0.0-test/rpo-mobile-2.0.0.apk"\nPWA_VERSION = "1.0.0"\nPWA_URL = "https://rpo-mng.ru/app/"\n',
+          )
+          text = text.replace(
+              'app = FastAPI(title=settings.app_name, version="0.5.0", lifespan=lifespan)',
+              'app = FastAPI(title=settings.app_name, version="0.5.1", lifespan=lifespan)',
+          )
+          text = text.replace(
+              'app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")\n',
+              'app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")\napp.mount("/pwa-assets", StaticFiles(directory=PWA_DIR), name="pwa-assets")\n',
+          )
+
+          root_block = '''@app.get("/", include_in_schema=False)\ndef root():\n    return RedirectResponse("/dashboard", status_code=303)\n'''
+          routes = '''\n\n# RPO PWA ROUTES v1.0.0\n@app.get("/app", include_in_schema=False)\ndef pwa_redirect():\n    return RedirectResponse("/app/", status_code=307)\n\n\n@app.get("/app/", include_in_schema=False)\ndef pwa_index():\n    return FileResponse(\n        PWA_DIR / "index.html",\n        media_type="text/html; charset=utf-8",\n        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},\n    )\n\n\n@app.get("/app/manifest.webmanifest", include_in_schema=False)\ndef pwa_manifest():\n    return FileResponse(\n        PWA_DIR / "manifest.webmanifest",\n        media_type="application/manifest+json",\n        headers={"Cache-Control": "no-cache"},\n    )\n\n\n@app.get("/app/sw.js", include_in_schema=False)\ndef pwa_service_worker():\n    return FileResponse(\n        PWA_DIR / "sw.js",\n        media_type="application/javascript",\n        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/app/"},\n    )\n\n\n@app.get("/app/icon-{size}.png", include_in_schema=False)\ndef pwa_icon(size: int):\n    try:\n        content = make_icon_png(size)\n    except ValueError:\n        raise HTTPException(status_code=404, detail="Иконка не найдена")\n    return Response(content=content, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})\n'''
+          if root_block not in text:
+              raise SystemExit('Could not locate root route insertion point')
+          text = text.replace(root_block, root_block + routes)
+
+          text = text.replace(
+              '        "apk_url": MOBILE_APK_URL,\n        "checked_at": utcnow().isoformat(),',
+              '        "apk_url": MOBILE_APK_URL,\n        "pwa_version": PWA_VERSION,\n        "pwa_url": PWA_URL,\n        "checked_at": utcnow().isoformat(),',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          python -m compileall -q server/app
+          git diff --check
+      - name: Commit PWA routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/app/main.py
+          git commit -m 'Serve installable RPO PWA from FastAPI'
+          git push origin HEAD:pwa-ios
