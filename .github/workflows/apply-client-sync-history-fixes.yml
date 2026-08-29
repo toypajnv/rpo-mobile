@@ -1,0 +1,218 @@
+name: Apply client sync and history fixes
+
+on:
+  push:
+    branches: [fix-client-sync-history]
+    paths:
+      - '.github/workflows/apply-client-sync-history-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-client-sync-history
+          fetch-depth: 0
+
+      - name: Apply Android PWA and server fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'Pattern not found in {path}: {old[:100]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          def append_before(path, marker, addition):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if marker not in text:
+                  raise SystemExit(f'Marker not found in {path}')
+              p.write_text(text.replace(marker, addition + marker, 1), encoding='utf-8')
+
+          # Android version 2.0.1.
+          replace_once('android/app/build.gradle.kts', 'versionCode = 10\n        versionName = "2.0.0"', 'versionCode = 11\n        versionName = "2.0.1"')
+
+          # Shared Android rule: do not re-send unchanged server fields.
+          append_before(
+              'android/app/src/main/java/ru/rpo/mobile/ui/FormRules.kt',
+              'fun stageDataReady(state: FormState): Boolean = when (state.stage.kind) {',
+              '''fun shouldSendStageField(\n    serverValue: String?,\n    serverComment: String?,\n    newValue: String,\n    newComment: String,\n): Boolean = serverValue == null ||\n    serverValue.trim() != newValue.trim() ||\n    serverComment.orEmpty().trim() != newComment.trim()\n\n''',
+          )
+
+          vm = Path('android/app/src/main/java/ru/rpo/mobile/ui/RpoViewModel.kt')
+          text = vm.read_text(encoding='utf-8')
+          text = text.replace(
+              '    private var serverPermitSnapshot: PermitSnapshot? = null\n',
+              '    private var serverPermitSnapshot: PermitSnapshot? = null\n    private var stageEditRevision: Long = 0\n',
+              1,
+          )
+          text = text.replace(
+              '        val normalized = permitNumber.trim().uppercase()\n        if (!permitRegex.matches(normalized)) {',
+              '        val normalized = permitNumber.trim().uppercase()\n        val revisionAtSchedule = stageEditRevision\n        if (!permitRegex.matches(normalized)) {',
+              1,
+          )
+          text = text.replace(
+              '                    _state.value = applySnapshotToStage(base, base.stage, snapshot)\n',
+              '''                    _state.value = if (stageEditRevision == revisionAtSchedule) {\n                        applySnapshotToStage(base, base.stage, snapshot)\n                    } else {\n                        // A delayed server lookup must never erase a date/time the worker just entered.\n                        base\n                    }\n''',
+              1,
+          )
+          old_updates = '''    fun updatePrimaryDate(v: String) { _state.value = _state.value.copy(primaryDate = v.take(10), message = null) }\n    fun updatePrimaryTime(v: String) { _state.value = _state.value.copy(primaryTime = v.take(5), message = null) }\n    fun updateSecondaryDate(v: String) { _state.value = _state.value.copy(secondaryDate = v.take(10), message = null) }\n    fun updateSecondaryTime(v: String) { _state.value = _state.value.copy(secondaryTime = v.take(5), message = null) }\n    fun updateThirdDate(v: String) { _state.value = _state.value.copy(thirdDate = v.take(10), message = null) }\n    fun updateThirdTime(v: String) { _state.value = _state.value.copy(thirdTime = v.take(5), message = null) }\n    fun updateExtensionDate(v: String) { _state.value = _state.value.copy(extensionDate = v.take(10), message = null) }\n    fun updateStopReason(v: String) { _state.value = _state.value.copy(stopReason = v.take(500), message = null) }\n    fun updateComment(v: String) { _state.value = _state.value.copy(comment = v.take(500), message = null) }\n'''
+          new_updates = '''    private fun stageEdited() { stageEditRevision++ }\n\n    fun updatePrimaryDate(v: String) { stageEdited(); _state.value = _state.value.copy(primaryDate = v.take(10), message = null) }\n    fun updatePrimaryTime(v: String) { stageEdited(); _state.value = _state.value.copy(primaryTime = v.take(5), message = null) }\n    fun updateSecondaryDate(v: String) { stageEdited(); _state.value = _state.value.copy(secondaryDate = v.take(10), message = null) }\n    fun updateSecondaryTime(v: String) { stageEdited(); _state.value = _state.value.copy(secondaryTime = v.take(5), message = null) }\n    fun updateThirdDate(v: String) { stageEdited(); _state.value = _state.value.copy(thirdDate = v.take(10), message = null) }\n    fun updateThirdTime(v: String) { stageEdited(); _state.value = _state.value.copy(thirdTime = v.take(5), message = null) }\n    fun updateExtensionDate(v: String) { stageEdited(); _state.value = _state.value.copy(extensionDate = v.take(10), message = null) }\n    fun updateStopReason(v: String) { stageEdited(); _state.value = _state.value.copy(stopReason = v.take(500), message = null) }\n    fun updateComment(v: String) { stageEdited(); _state.value = _state.value.copy(comment = v.take(500), message = null) }\n'''
+          if old_updates not in text:
+              raise SystemExit('Android update methods block not found')
+          text = text.replace(old_updates, new_updates, 1)
+          for old, new in [
+              ('        updated[index] = updated[index].copy(name = value.take(180))\n        _state.value = _state.value.copy(replacements = updated, message = null)', '        updated[index] = updated[index].copy(name = value.take(180))\n        stageEdited()\n        _state.value = _state.value.copy(replacements = updated, message = null)'),
+              ('        updated[index] = updated[index].copy(position = value.take(180))\n        _state.value = _state.value.copy(replacements = updated, message = null)', '        updated[index] = updated[index].copy(position = value.take(180))\n        stageEdited()\n        _state.value = _state.value.copy(replacements = updated, message = null)'),
+              ('        if (_state.value.replacements.size >= 12) return\n        _state.value = _state.value.copy(replacements = _state.value.replacements + ReplacementEntry(), message = null)', '        if (_state.value.replacements.size >= 12) return\n        stageEdited()\n        _state.value = _state.value.copy(replacements = _state.value.replacements + ReplacementEntry(), message = null)'),
+              ('        val updated = current.filterIndexed { i, _ -> i != index }.ifEmpty { listOf(ReplacementEntry()) }\n        _state.value = _state.value.copy(replacements = updated, message = null)', '        val updated = current.filterIndexed { i, _ -> i != index }.ifEmpty { listOf(ReplacementEntry()) }\n        stageEdited()\n        _state.value = _state.value.copy(replacements = updated, message = null)'),
+              ('        val n = LocalDateTime.now()\n        _state.value = _state.value.copy(primaryDate = n.toLocalDate().format(dateFmt), primaryTime = n.toLocalTime().format(timeFmt), message = null)', '        val n = LocalDateTime.now()\n        stageEdited()\n        _state.value = _state.value.copy(primaryDate = n.toLocalDate().format(dateFmt), primaryTime = n.toLocalTime().format(timeFmt), message = null)'),
+              ('        val n = LocalDateTime.now()\n        _state.value = _state.value.copy(secondaryDate = n.toLocalDate().format(dateFmt), secondaryTime = n.toLocalTime().format(timeFmt), message = null)', '        val n = LocalDateTime.now()\n        stageEdited()\n        _state.value = _state.value.copy(secondaryDate = n.toLocalDate().format(dateFmt), secondaryTime = n.toLocalTime().format(timeFmt), message = null)'),
+              ('        val n = LocalDateTime.now()\n        _state.value = _state.value.copy(thirdDate = n.toLocalDate().format(dateFmt), thirdTime = n.toLocalTime().format(timeFmt), message = null)', '        val n = LocalDateTime.now()\n        stageEdited()\n        _state.value = _state.value.copy(thirdDate = n.toLocalDate().format(dateFmt), thirdTime = n.toLocalTime().format(timeFmt), message = null)'),
+              ('    fun extensionTomorrow() {\n        _state.value = _state.value.copy(extensionDate = LocalDate.now().plusDays(1).format(dateFmt), message = null)\n    }', '    fun extensionTomorrow() {\n        stageEdited()\n        _state.value = _state.value.copy(extensionDate = LocalDate.now().plusDays(1).format(dateFmt), message = null)\n    }'),
+          ]:
+              if old not in text:
+                  raise SystemExit(f'Android edit marker missing: {old[:80]}')
+              text = text.replace(old, new, 1)
+
+          send_old = '''        val requests = validation.events.map { event ->\n            EventRequest(\n'''
+          send_new = '''        val eventsToSend = validation.events.filter { event ->\n            val serverField = serverPermitSnapshot?.fields?.get(event.stage.key)\n            shouldSendStageField(\n                serverValue = serverField?.field_value,\n                serverComment = serverField?.comment,\n                newValue = event.fieldValue,\n                newComment = event.comment,\n            )\n        }\n        if (eventsToSend.isEmpty()) {\n            _state.value = s.copy(\n                errors = emptyMap(),\n                message = "Заполненные данные этого этапа уже переданы на сервер",\n                success = true,\n            )\n            return true\n        }\n\n        val requests = eventsToSend.map { event ->\n            EventRequest(\n'''
+          if send_old not in text:
+              raise SystemExit('Android request map marker not found')
+          text = text.replace(send_old, send_new, 1)
+          vm.write_text(text, encoding='utf-8')
+
+          # Android history: tap a permit to drill into all transmitted values.
+          app = Path('android/app/src/main/java/ru/rpo/mobile/ui/RpoApp.kt')
+          text = app.read_text(encoding='utf-8')
+          old = '''private fun HistoryScreen(items: List<ru.rpo.mobile.data.EventResponse>) {\n    Column(\n'''
+          new = '''private fun HistoryScreen(items: List<ru.rpo.mobile.data.EventResponse>) {\n    var expandedPermit by remember { mutableStateOf<String?>(null) }\n    Column(\n'''
+          if old not in text: raise SystemExit('HistoryScreen marker missing')
+          text = text.replace(old, new, 1)
+          old = '''        items.forEach { e ->\n            ElevatedCard(Modifier.fillMaxWidth()) {\n                Column(Modifier.padding(14.dp)) {\n                    Row {\n                        Text(e.permit_number, fontWeight = FontWeight.Bold, color = Navy)\n                        Spacer(Modifier.weight(1f))\n                        Text(e.field_key, color = Blue, fontWeight = FontWeight.Bold)\n                    }\n                    Text(e.stage_label, fontWeight = FontWeight.SemiBold)\n                    if (!e.structural_unit.isNullOrBlank()) Text(e.structural_unit.orEmpty(), color = Blue, fontSize = 12.sp)\n                    Text(e.field_value, color = Color.DarkGray)\n                    if (e.comment.isNotBlank()) Text(e.comment, color = Color.Gray, fontSize = 12.sp)\n                    Text(\n                        if (e.approval_required) approvalStatusLabel(e.approval_status) else "Разрешение не требуется",\n                        color = if (e.approval_status == "approved") Green else if (e.approval_status == "pending") Orange else Blue,\n                        fontSize = 12.sp,\n                        fontWeight = FontWeight.SemiBold,\n                        modifier = Modifier.padding(top = 7.dp),\n                    )\n                    Text(\n                        if (e.exported_at == null) "На сервере · не выгружено" else "Выгружено оператором",\n                        color = Color.Gray,\n                        fontSize = 11.sp,\n                    )\n                }\n            }\n        }\n'''
+          new = '''        items.forEach { e ->\n            val expanded = expandedPermit == e.permit_number\n            ElevatedCard(\n                Modifier.fillMaxWidth().clickable {\n                    expandedPermit = if (expanded) null else e.permit_number\n                }\n            ) {\n                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {\n                    Row(verticalAlignment = Alignment.CenterVertically) {\n                        Text(e.permit_number, fontWeight = FontWeight.Bold, color = Navy)\n                        Spacer(Modifier.weight(1f))\n                        Icon(\n                            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,\n                            if (expanded) "Скрыть данные" else "Открыть данные",\n                            tint = Blue,\n                        )\n                    }\n                    Text(e.stage_label, fontWeight = FontWeight.SemiBold)\n                    if (!e.structural_unit.isNullOrBlank()) Text(e.structural_unit.orEmpty(), color = Blue, fontSize = 12.sp)\n                    Text(\n                        if (e.approval_required) approvalStatusLabel(e.approval_status) else "Разрешение не требуется",\n                        color = if (e.approval_status == "approved") Green else if (e.approval_status == "pending") Orange else Blue,\n                        fontSize = 12.sp,\n                        fontWeight = FontWeight.SemiBold,\n                    )\n                    if (expanded) {\n                        HorizontalDivider(Modifier.padding(vertical = 4.dp))\n                        Text("Переданные данные", fontWeight = FontWeight.SemiBold)\n                        Text(e.field_value, color = Color.DarkGray)\n                        if (e.comment.isNotBlank()) {\n                            Text("Комментарии", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)\n                            Text(e.comment, color = Color.Gray, fontSize = 12.sp)\n                        }\n                        Text(\n                            if (e.exported_at == null) "На сервере · не выгружено" else "Выгружено оператором",\n                            color = Color.Gray,\n                            fontSize = 11.sp,\n                        )\n                    } else {\n                        Text("Нажмите, чтобы посмотреть ранее переданные данные", color = Color.Gray, fontSize = 11.sp)\n                    }\n                }\n            }\n        }\n'''
+          if old not in text: raise SystemExit('History cards block missing')
+          app.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Android tests for unchanged-event filtering.
+          test = Path('android/app/src/test/java/ru/rpo/mobile/ui/FormRulesTest.kt')
+          text = test.read_text(encoding='utf-8')
+          marker = '\n}\n'
+          addition = '''\n    @Test\n    fun unchangedServerFieldIsNotSentAgain() {\n        assertFalse(shouldSendStageField("29.08.2026 10:00", "", "29.08.2026 10:00", ""))\n        assertTrue(shouldSendStageField("29.08.2026 10:00", "", "29.08.2026 11:00", ""))\n        assertTrue(shouldSendStageField("29.08.2026 10:00", "Старый", "29.08.2026 10:00", "Новый"))\n        assertTrue(shouldSendStageField(null, null, "29.08.2026 10:00", ""))\n    }\n'''
+          pos = text.rfind(marker)
+          if pos < 0: raise SystemExit('FormRulesTest closing marker missing')
+          test.write_text(text[:pos] + addition + text[pos:], encoding='utf-8')
+
+          # Server versions + exact duplicate protection + mobile permit suggestions.
+          main = Path('server/app/main.py')
+          text = main.read_text(encoding='utf-8')
+          text = text.replace('LATEST_MOBILE_VERSION = "2.0.0"', 'LATEST_MOBILE_VERSION = "2.0.1"', 1)
+          text = text.replace('releases/download/v2.0.0-test/rpo-mobile-2.0.0.apk', 'releases/download/v2.0.1-test/rpo-mobile-2.0.1.apk', 1)
+          text = text.replace('PWA_VERSION = "1.0.0"', 'PWA_VERSION = "1.0.1"', 1)
+          text = text.replace('app = FastAPI(title=settings.app_name, version="0.5.1", lifespan=lifespan)', 'app = FastAPI(title=settings.app_name, version="0.5.2", lifespan=lifespan)', 1)
+          marker = '''    existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == client_event_id))\n    if existing:\n        return existing\n    try:\n'''
+          replacement = '''    existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == client_event_id))\n    if existing:\n        return existing\n\n    # Safety net for current and legacy clients: an unchanged stage must not create\n    # a second transmission or reset its operator approval merely because the client\n    # generated a new client_event_id.\n    latest_same_stage = db.scalar(\n        select(MobileEvent)\n        .where(\n            MobileEvent.permit_number == payload.permit_number,\n            MobileEvent.field_key == payload.field_key,\n        )\n        .order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc())\n        .limit(1)\n    )\n    if (\n        latest_same_stage\n        and latest_same_stage.worker_name == payload.worker_name\n        and (latest_same_stage.structural_unit or "") == (payload.structural_unit or "")\n        and dt_utc(latest_same_stage.event_time) == dt_utc(payload.event_time)\n        and latest_same_stage.field_value.strip() == payload.field_value.strip()\n        and (latest_same_stage.comment or "").strip() == payload.comment.strip()\n    ):\n        return latest_same_stage\n    try:\n'''
+          if marker not in text: raise SystemExit('Server create event marker missing')
+          text = text.replace(marker, replacement, 1)
+          permit_marker = '''@app.get("/api/mobile/permit")\ndef mobile_permit_lookup(\n'''
+          suggestions = '''@app.get("/api/mobile/permit-suggestions")\ndef mobile_permit_suggestions(\n    q: str = Query(min_length=3, max_length=80),\n    limit: int = Query(8, ge=1, le=12),\n    db: Session = Depends(get_db),\n):\n    query = q.strip().upper()\n    pattern = f"%{query}%"\n    records = list(db.scalars(\n        select(PermitRecord)\n        .where(PermitRecord.permit_number.ilike(pattern))\n        .order_by(PermitRecord.updated_at.desc())\n        .limit(limit)\n    ))\n    return [\n        {\n            "permit_number": record.permit_number,\n            "worker_name": record.worker_name,\n            "structural_unit": record.structural_unit or "",\n            "updated_at": record.updated_at.isoformat(),\n        }\n        for record in records\n    ]\n\n\n'''
+          if permit_marker not in text: raise SystemExit('Permit endpoint marker missing')
+          main.write_text(text.replace(permit_marker, suggestions + permit_marker, 1), encoding='utf-8')
+
+          # PWA 1.0.1: custom iOS suggestions, preserve draft on lookup, do not resend old fields, expandable history.
+          pwa = Path('server/app/pwa/app.js')
+          text = pwa.read_text(encoding='utf-8')
+          text = text.replace("const PWA_VERSION = '1.0.0';", "const PWA_VERSION = '1.0.1';", 1)
+          text = text.replace("const ANDROID_API_VERSION = '2.0.0';", "const ANDROID_API_VERSION = '2.0.1';", 1)
+          text = text.replace('  let replacementCounter = 1;\n', '  let replacementCounter = 1;\n  let remotePermitSuggestions = [];\n  let permitSuggestionTimer = null;\n  let noNewEvents = false;\n', 1)
+          old = '''  function renderPermitSuggestions() {\n    const list = $('permit-suggestions');\n    list.replaceChildren(...memories().map(m => {\n      const option=document.createElement('option'); option.value=m.permitNumber; option.label=m.workerName || m.structuralUnit || ''; return option;\n    }));\n  }\n'''
+          new = '''  function combinedPermitSuggestions() {\n    const byPermit = new Map();\n    [...memories().map(m=>({permit_number:m.permitNumber,worker_name:m.workerName,structural_unit:m.structuralUnit||''})), ...remotePermitSuggestions]\n      .forEach(item=>{const key=String(item.permit_number||'').toUpperCase();if(key&&!byPermit.has(key))byPermit.set(key,item);});\n    return [...byPermit.values()];\n  }\n  function selectPermitSuggestion(item) {\n    permit.value=stripLatin(item.permit_number||'').toUpperCase();\n    if(item.worker_name)worker.value=stripLatin(item.worker_name);\n    if(UNITS.includes(item.structural_unit))unit.value=item.structural_unit;\n    const menu=$('permit-suggestion-menu');if(menu)menu.hidden=true;\n    lookupPermit(true);updateChecklist();\n  }\n  function renderPermitSuggestions() {\n    const items=combinedPermitSuggestions();\n    const list=$('permit-suggestions');\n    list.replaceChildren(...items.map(m=>{const option=document.createElement('option');option.value=m.permit_number;option.label=m.worker_name||m.structural_unit||'';return option;}));\n    const menu=$('permit-suggestion-menu');if(!menu)return;\n    const q=permit.value.trim().toUpperCase();\n    const filtered=items.filter(m=>!q||String(m.permit_number||'').toUpperCase().includes(q)).slice(0,8);\n    if(document.activeElement!==permit||!filtered.length){menu.hidden=true;menu.innerHTML='';return;}\n    menu.innerHTML=filtered.map((m,i)=>`<button type="button" class="permit-suggestion-item" data-index="${i}"><strong>${escapeHtml(m.permit_number)}</strong><span>${escapeHtml(m.worker_name||m.structural_unit||'Ранее заполненный НД')}</span></button>`).join('');\n    menu.hidden=false;\n    menu.querySelectorAll('[data-index]').forEach(btn=>btn.addEventListener('mousedown',e=>e.preventDefault()));\n    menu.querySelectorAll('[data-index]').forEach(btn=>btn.addEventListener('click',()=>selectPermitSuggestion(filtered[Number(btn.dataset.index)])));\n  }\n  async function fetchRemotePermitSuggestions() {\n    const q=permit.value.trim().toUpperCase();\n    if(q.length<3||!navigator.onLine){remotePermitSuggestions=[];renderPermitSuggestions();return;}\n    try{const r=await fetch(`/api/mobile/permit-suggestions?q=${encodeURIComponent(q)}&limit=8`,{cache:'no-store'});if(r.ok)remotePermitSuggestions=await r.json();}\n    catch(_){}\n    renderPermitSuggestions();\n  }\n  function schedulePermitSuggestions(){clearTimeout(permitSuggestionTimer);renderPermitSuggestions();if(permit.value.trim().length>=3)permitSuggestionTimer=setTimeout(fetchRemotePermitSuggestions,250);}\n'''
+          if old not in text: raise SystemExit('PWA suggestions function marker missing')
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              '''  function applyPermitData(data){serverFields=data.fields||{};if(data.worker_name)worker.value=stripLatin(data.worker_name);if(UNITS.includes(data.structural_unit))unit.value=data.structural_unit;renderApproval(data.approval);renderStageOptions();renderStageFields();localStorage.setItem(STORAGE.worker,worker.value);localStorage.setItem(STORAGE.unit,unit.value);rememberPermit();}\n''',
+              '''  function hasStageDraft(){return stageFingerprint()!==baselineFingerprint;}\n  function applyPermitData(data,preserveDraft=false){serverFields=data.fields||{};if(data.worker_name)worker.value=stripLatin(data.worker_name);if(UNITS.includes(data.structural_unit))unit.value=data.structural_unit;renderApproval(data.approval);renderStageOptions();if(!preserveDraft)renderStageFields();else updateChecklist();localStorage.setItem(STORAGE.worker,worker.value);localStorage.setItem(STORAGE.unit,unit.value);rememberPermit();}\n''',
+              1,
+          )
+          old_lookup = '''  async function lookupPermit(silent=false){const p=permit.value.trim().toUpperCase();if(!permitValid(p)||!navigator.onLine)return false;try{const r=await fetch(`/api/mobile/permit?permit_number=${encodeURIComponent(p)}`,{cache:'no-store'});if(r.status===404){serverFields={};renderApproval(null);renderStageOptions();renderStageFields();return false;}if(!r.ok)throw new Error('lookup');const data=await r.json();applyPermitData(data);if(!silent)showFlash(true,'Данные НД загружены','Ранее переданные этапы и статус получены с сервера.');return true;}catch(_){if(!silent)showFlash(false,'Нет связи','Не удалось получить данные НД. Можно продолжить — новые данные сохранятся локально.');return false;}}\n'''
+          new_lookup = '''  async function lookupPermit(silent=false){const p=permit.value.trim().toUpperCase();if(!permitValid(p)||!navigator.onLine)return false;try{const r=await fetch(`/api/mobile/permit?permit_number=${encodeURIComponent(p)}`,{cache:'no-store'});const preserveDraft=hasStageDraft();if(r.status===404){serverFields={};renderApproval(null);renderStageOptions();if(!preserveDraft)renderStageFields();else updateChecklist();return false;}if(!r.ok)throw new Error('lookup');const data=await r.json();applyPermitData(data,preserveDraft);if(!silent)showFlash(true,'Данные НД загружены','Ранее переданные этапы и статус получены с сервера.');return true;}catch(_){if(!silent)showFlash(false,'Нет связи','Не удалось получить данные НД. Можно продолжить — новые данные сохранятся локально.');return false;}}\n'''
+          if old_lookup not in text: raise SystemExit('PWA lookup marker missing')
+          text = text.replace(old_lookup, new_lookup, 1)
+          text = text.replace(
+              '    return ok?events:[];\n  }\n\n  function queue()',
+              '''    if(!ok){noNewEvents=false;return [];}\n    const fresh=events.filter(event=>{const old=fieldServer(event.field_key);return !old||String(old.field_value||'').trim()!==String(event.field_value||'').trim()||String(old.comment||'').trim()!==String(event.comment||'').trim();});\n    noNewEvents=events.length>0&&fresh.length===0;\n    return fresh;\n  }\n\n  function queue()''',
+              1,
+          )
+          old_save = '''  async function saveStage(){const events=buildEvents();updateChecklist();if(!events.length){showFlash(false,'Проверьте заполнение','Исправьте отмеченные поля и повторите сохранение.');return;}saveButton.disabled=true;enqueue(events);markStageSaved(currentStage().id);rememberPermit();localStorage.setItem(STORAGE.worker,worker.value.trim());localStorage.setItem(STORAGE.unit,unit.value);renderStageOptions();baselineFingerprint=stageFingerprint();updateChecklist();showFlash(true,'Данные сохранены на iPhone',navigator.onLine?'Выполняется отправка на сервер...':'Нет сети. Отправка произойдёт автоматически.');await syncQueue(true);saveButton.disabled=false;}\n'''
+          new_save = '''  async function saveStage(){const events=buildEvents();updateChecklist();if(!events.length){if(noNewEvents){markStageSaved(currentStage().id);baselineFingerprint=stageFingerprint();updateChecklist();showFlash(true,'Уже передано','Заполненные данные этого этапа уже есть на сервере.');return;}showFlash(false,'Проверьте заполнение','Исправьте отмеченные поля и повторите сохранение.');return;}saveButton.disabled=true;enqueue(events);markStageSaved(currentStage().id);rememberPermit();localStorage.setItem(STORAGE.worker,worker.value.trim());localStorage.setItem(STORAGE.unit,unit.value);renderStageOptions();baselineFingerprint=stageFingerprint();updateChecklist();showFlash(true,'Данные сохранены на iPhone',navigator.onLine?'Выполняется отправка на сервер...':'Нет сети. Отправка произойдёт автоматически.');await syncQueue(true);saveButton.disabled=false;}\n'''
+          if old_save not in text: raise SystemExit('PWA save marker missing')
+          text = text.replace(old_save, new_save, 1)
+          old_history = '''  function renderHistory(items){const list=$('history-list');if(!items.length){list.innerHTML='<div class="card"><p class="subtitle">История на этом устройстве пока пуста.</p></div>';return;}list.innerHTML=items.map(x=>{const dt=new Date(x.received_at);const when=Number.isNaN(dt.getTime())?'':dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});const a=x.approval_status==='pending'?'pending':x.approval_status==='approved'?'approved':'';return `<article class="history-card"><div class="history-head"><strong>${escapeHtml(x.permit_number)}</strong><time>${when}</time></div><p>${escapeHtml(x.worker_name||'')}</p><p>${escapeHtml(x.field_value||'')}</p><div class="history-meta"><span class="pill">${escapeHtml(x.structural_unit||'—')}</span><span class="pill ${a}">${x.approval_status==='pending'?'Ожидает разрешения':x.approval_status==='approved'?'Разрешено':'Статус записан'}</span></div></article>`;}).join('');}\n'''
+          new_history = '''  function renderHistory(items){const list=$('history-list');if(!items.length){list.innerHTML='<div class="card"><p class="subtitle">История на этом устройстве пока пуста.</p></div>';return;}list.innerHTML=items.map((x,i)=>{const dt=new Date(x.received_at);const when=Number.isNaN(dt.getTime())?'':dt.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});const a=x.approval_status==='pending'?'pending':x.approval_status==='approved'?'approved':'';return `<article class="history-card history-clickable" data-history-index="${i}"><div class="history-head"><strong>${escapeHtml(x.permit_number)}</strong><time>${when}</time></div><p>${escapeHtml(x.worker_name||'')}</p><div class="history-meta"><span class="pill">${escapeHtml(x.structural_unit||'—')}</span><span class="pill ${a}">${x.approval_status==='pending'?'Ожидает разрешения':x.approval_status==='approved'?'Разрешено':'Статус записан'}</span></div><div class="history-open-hint">Нажмите, чтобы посмотреть переданные данные ›</div><div class="history-details" hidden><strong>Переданные данные</strong><p>${escapeHtml(x.field_value||'')}</p>${x.comment?`<strong>Комментарии</strong><p>${escapeHtml(x.comment)}</p>`:''}</div></article>`;}).join('');list.querySelectorAll('[data-history-index]').forEach(card=>card.addEventListener('click',()=>{const details=card.querySelector('.history-details'),hint=card.querySelector('.history-open-hint');const opening=details.hidden;list.querySelectorAll('.history-details').forEach(x=>x.hidden=true);list.querySelectorAll('.history-open-hint').forEach(x=>x.hidden=false);details.hidden=!opening;hint.hidden=opening;}));}\n'''
+          if old_history not in text: raise SystemExit('PWA history marker missing')
+          text = text.replace(old_history, new_history, 1)
+          old_input = '''    permit.addEventListener('input',()=>{permit.value=stripLatin(permit.value).toUpperCase();scheduleLookup();renderPermitSuggestions();updateChecklist();});permit.addEventListener('change',()=>{permit.value=stripLatin(permit.value).toUpperCase();lookupPermit(true);});\n'''
+          new_input = '''    permit.addEventListener('input',()=>{permit.value=stripLatin(permit.value).toUpperCase();scheduleLookup();schedulePermitSuggestions();updateChecklist();});permit.addEventListener('focus',schedulePermitSuggestions);permit.addEventListener('blur',()=>setTimeout(()=>{const menu=$('permit-suggestion-menu');if(menu)menu.hidden=true;},180));permit.addEventListener('change',()=>{permit.value=stripLatin(permit.value).toUpperCase();lookupPermit(true);});\n'''
+          if old_input not in text: raise SystemExit('PWA permit input marker missing')
+          text = text.replace(old_input, new_input, 1)
+          pwa.write_text(text, encoding='utf-8')
+
+          # PWA markup and cache-busting.
+          index = Path('server/app/pwa/index.html')
+          text = index.read_text(encoding='utf-8')
+          text = text.replace('/pwa-assets/app.css?v=20260829-1', '/pwa-assets/app.css?v=20260829-2')
+          text = text.replace('/pwa-assets/app.js?v=20260829-1', '/pwa-assets/app.js?v=20260829-2')
+          text = text.replace('<datalist id="permit-suggestions"></datalist>\n            <button id="permit-refresh"', '<datalist id="permit-suggestions"></datalist>\n            <div id="permit-suggestion-menu" class="permit-suggestion-menu" hidden></div>\n            <button id="permit-refresh"', 1)
+          text = text.replace('PWA 1.0.0 · единая система с Android РПО 2.0.0.', 'PWA 1.0.1 · единая система с Android РПО 2.0.1.')
+          index.write_text(text, encoding='utf-8')
+
+          css = Path('server/app/pwa/app.css')
+          text = css.read_text(encoding='utf-8')
+          text += '''\n.permit-suggestion-menu{position:absolute;left:0;right:0;top:58px;z-index:45;background:#fff;border:1px solid #cbd8e8;border-radius:12px;box-shadow:0 12px 30px rgba(24,50,82,.18);max-height:280px;overflow:auto;padding:5px}.permit-suggestion-item{width:100%;border:0;background:#fff;border-radius:9px;padding:10px 11px;text-align:left;display:flex;flex-direction:column;gap:2px;color:var(--text);font:inherit}.permit-suggestion-item:active{background:#edf4fd}.permit-suggestion-item strong{font-size:14px;color:var(--navy)}.permit-suggestion-item span{font-size:10px;color:var(--muted)}.history-clickable{cursor:pointer}.history-open-hint{margin-top:9px;color:var(--blue);font-size:10px;font-weight:750}.history-details{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}.history-details>strong{font-size:12px}.history-details p{font-size:11px;white-space:pre-wrap}\n'''
+          css.write_text(text, encoding='utf-8')
+
+          sw = Path('server/app/pwa/sw.js')
+          text = sw.read_text(encoding='utf-8')
+          text = text.replace("const CACHE='rpo-pwa-shell-v1.0.0';", "const CACHE='rpo-pwa-shell-v1.0.1';")
+          text = text.replace('/pwa-assets/app.css?v=20260829-1', '/pwa-assets/app.css?v=20260829-2')
+          text = text.replace('/pwa-assets/app.js?v=20260829-1', '/pwa-assets/app.js?v=20260829-2')
+          sw.write_text(text, encoding='utf-8')
+
+          # PWA regression expectations.
+          test = Path('server/tests/test_pwa.py')
+          text = test.read_text(encoding='utf-8')
+          text = text.replace("const CACHE='rpo-pwa-shell-v1.0.0'", "const CACHE='rpo-pwa-shell-v1.0.1'")
+          text = text.replace("data['latest_app_version'], '2.0.0'", "data['latest_app_version'], '2.0.1'")
+          text = text.replace("data['pwa_version'], '1.0.0'", "data['pwa_version'], '1.0.1'")
+          text = text.replace("data['server_version'], '0.5.1'", "data['server_version'], '0.5.2'")
+          text = text.replace("        self.assertIn('/api/mobile/permit', js)\n", "        self.assertIn('/api/mobile/permit', js)\n        self.assertIn('/api/mobile/permit-suggestions', js)\n        self.assertIn('permit-suggestion-menu', html)\n        self.assertIn('hasStageDraft', js)\n        self.assertIn('noNewEvents', js)\n        self.assertIn('history-details', js)\n")
+          test.write_text(text, encoding='utf-8')
+
+          # Server behavior regression tests: different client ID + identical stage stays one event; suggestions find permit.
+          new_test = Path('server/tests/test_client_sync_iteration.py')
+          new_test.write_text('''from fastapi.testclient import TestClient\n\nfrom app.main import app\n\n\ndef _payload(client_event_id: str):\n    return {\n        "client_event_id": client_event_id,\n        "device_id": "sync-iteration-device",\n        "worker_name": "Иванов Иван Иванович",\n        "structural_unit": "ЦДПН-1",\n        "permit_number": "НД-ПОДСКАЗКА-2908",\n        "field_key": "AT",\n        "stage_label": "Начало подготовки",\n        "event_time": "2026-08-29T15:00:00+00:00",\n        "field_value": "29.08.2026 20:00",\n        "comment": "",\n    }\n\n\ndef test_identical_stage_with_new_client_id_is_not_duplicated():\n    with TestClient(app) as client:\n        first = client.post('/api/mobile/events', json=_payload('sync-duplicate-00000001'))\n        assert first.status_code == 201, first.text\n        second = client.post('/api/mobile/events', json=_payload('sync-duplicate-00000002'))\n        assert second.status_code == 201, second.text\n        assert second.json()['id'] == first.json()['id']\n\n\ndef test_permit_suggestions_return_previous_server_permits():\n    with TestClient(app) as client:\n        client.post('/api/mobile/events', json=_payload('sync-suggest-000000001'))\n        response = client.get('/api/mobile/permit-suggestions', params={'q': 'ПОДСК'})\n        assert response.status_code == 200, response.text\n        rows = response.json()\n        assert any(row['permit_number'] == 'НД-ПОДСКАЗКА-2908' for row in rows)\n        match = next(row for row in rows if row['permit_number'] == 'НД-ПОДСКАЗКА-2908')\n        assert match['worker_name'] == 'Иванов Иван Иванович'\n        assert match['structural_unit'] == 'ЦДПН-1'\n''', encoding='utf-8')
+          PY
+
+          python -m compileall -q server/app server/tests
+          node --check server/app/pwa/app.js
+          git diff --check
+
+      - name: Commit functional fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android server
+          git commit -m 'Fix draft sync, duplicate stages, suggestions and history drilldown'
+          git push origin HEAD:fix-client-sync-history
