@@ -10,7 +10,9 @@ class DashboardWidthFitTests(unittest.TestCase):
 
         self.assertIn("Dashboard desktop width fit v2.0.1", css)
         self.assertIn("#tab-transmissions .table-wrap,#tab-works .table-wrap{overflow-x:hidden}", css)
-        self.assertIn("table-layout:fixed", css)
+        self.assertIn("width:100%;table-layout:fixed;white-space:normal", css)
+        self.assertIn("overflow-wrap:anywhere", css)
+        self.assertIn("#tab-transmissions .wrap-cell,#tab-works .works-stage-cell{min-width:0}", css)
         self.assertIn("#tab-works .stage-detail-line{grid-template-columns:1fr", css)
         self.assertIn("/static/app.css?v=20260829-3", html)
 
