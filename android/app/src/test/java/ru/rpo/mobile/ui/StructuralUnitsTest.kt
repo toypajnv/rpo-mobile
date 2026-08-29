@@ -21,5 +21,6 @@ class StructuralUnitsTest {
         assertEquals("Ожидает разрешения оператора", approvalStatusLabel("pending"))
         assertEquals("Работы можно проводить", approvalStatusLabel("approved"))
         assertEquals("Разрешение не требуется", approvalStatusLabel("not_required"))
+        assertEquals("Работы остановлены", approvalStatusLabel("stopped"))
     }
 }

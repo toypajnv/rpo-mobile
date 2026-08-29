@@ -20,5 +20,6 @@ fun approvalStatusLabel(status: String): String = when (status) {
     "pending" -> "Ожидает разрешения оператора"
     "approved" -> "Работы можно проводить"
     "not_required" -> "Разрешение не требуется"
+    "stopped" -> "Работы остановлены"
     else -> "Статус разрешения пока не получен"
 }

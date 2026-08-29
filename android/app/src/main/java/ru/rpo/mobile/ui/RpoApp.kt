@@ -489,12 +489,15 @@ private fun ApprovalStatusCard(s: FormState) {
     if (s.permitNumber.trim().length < 3 || approval.status == "none") return
     val pending = approval.status == "pending"
     val approved = approval.status == "approved"
+    val stopped = approval.status == "stopped"
     val bg = when {
+        stopped -> Color(0xFFFFEEEE)
         pending -> Color(0xFFFFF4DF)
         approved -> Color(0xFFE7F7EC)
         else -> Color(0xFFEAF3FF)
     }
     val accent = when {
+        stopped -> Red
         pending -> Orange
         approved -> Green
         else -> Blue
@@ -507,6 +510,7 @@ private fun ApprovalStatusCard(s: FormState) {
                 Text(approvalStatusLabel(approval.status), color = accent, fontWeight = FontWeight.Bold)
                 Text(
                     when {
+                        stopped -> "Работы остановлены. Для возобновления передайте этап «Возобновление работ» и дождитесь разрешения оператора."
                         pending -> "Передано на сервер. Ожидающих разрешения этапов: ${approval.pending_count}."
                         approved -> "Оператор подтвердил последние переданные этапы. Работы можно проводить."
                         else -> "Для этого события отдельное разрешение оператора не требуется."

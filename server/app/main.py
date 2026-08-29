@@ -204,11 +204,17 @@ def _approval_summary_from_data(data: dict) -> dict:
             required.append(field)
     pending = [field for field in required if str(field.get("approval_status", "pending")) == "pending"]
     approved = [field for field in required if str(field.get("approval_status", "")) == "approved"]
+    stop_at = _field_dt(data, "AZ")
+    resume_at = _field_dt(data, "BA")
+    stopped = bool(stop_at and (not resume_at or stop_at > resume_at))
     approved_times = sorted(
         [str(field.get("approved_at", "")).strip() for field in approved if str(field.get("approved_at", "")).strip()],
         reverse=True,
     )
-    if pending:
+    if stopped:
+        status = "stopped"
+        label = "Работы остановлены"
+    elif pending:
         status = "pending"
         label = "Ожидает разрешения"
     elif approved:
@@ -227,8 +233,8 @@ def _approval_summary_from_data(data: dict) -> dict:
 
 
 def _apply_record_filters(stmt, q: str = "", unit: str = ""):
-    query = (q or "").strip()
-    structural_unit = (unit or "").strip()
+    query = q.strip() if isinstance(q, str) else ""
+    structural_unit = unit.strip() if isinstance(unit, str) else ""
     if query:
         pattern = f"%{query}%"
         stmt = stmt.where(or_(
@@ -243,8 +249,8 @@ def _apply_record_filters(stmt, q: str = "", unit: str = ""):
 
 
 def _apply_event_filters(stmt, q: str = "", unit: str = ""):
-    query = (q or "").strip()
-    structural_unit = (unit or "").strip()
+    query = q.strip() if isinstance(q, str) else ""
+    structural_unit = unit.strip() if isinstance(unit, str) else ""
     if query:
         pattern = f"%{query}%"
         stmt = stmt.where(or_(
@@ -534,7 +540,7 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError:
         db.rollback()
-        existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == payload.client_event_id))
+        existing = db.scalar(select(MobileEvent).where(MobileEvent.client_event_id == client_event_id))
         if existing:
             return existing
         raise

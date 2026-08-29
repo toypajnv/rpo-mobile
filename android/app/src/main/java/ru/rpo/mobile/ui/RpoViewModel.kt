@@ -260,7 +260,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                         structuralUnit = unit,
                         approvalSummary = snapshot.approval,
                         serverSavedStageIds = savedStageIdsForFieldKeys(filledKeys),
-                        errors = _state.value.errors - "worker" - "permit",
+                        errors = _state.value.errors - "worker" - "permit" - "structuralUnit",
                         message = "Ранее заполненные данные по НД загружены с сервера",
                         success = true,
                     )
@@ -286,7 +286,8 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             workerName = worker,
             structuralUnit = unit,
             serverSavedStageIds = emptySet(),
-            errors = _state.value.errors - "permit" - "worker",
+            approvalSummary = null,
+            errors = _state.value.errors - "permit" - "worker" - "structuralUnit",
             message = null,
         )
         serverPermitSnapshot = null
