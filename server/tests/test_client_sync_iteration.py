@@ -1,3 +1,5 @@
+import unittest
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -18,22 +20,27 @@ def _payload(client_event_id: str):
     }
 
 
-def test_identical_stage_with_new_client_id_is_not_duplicated():
-    with TestClient(app) as client:
-        first = client.post('/api/mobile/events', json=_payload('sync-duplicate-00000001'))
-        assert first.status_code == 201, first.text
-        second = client.post('/api/mobile/events', json=_payload('sync-duplicate-00000002'))
-        assert second.status_code == 201, second.text
-        assert second.json()['id'] == first.json()['id']
+class ClientSyncIterationTests(unittest.TestCase):
+    def test_identical_stage_with_new_client_id_is_not_duplicated(self) -> None:
+        with TestClient(app) as client:
+            first = client.post('/api/mobile/events', json=_payload('sync-duplicate-00000001'))
+            self.assertEqual(first.status_code, 201, first.text)
+            second = client.post('/api/mobile/events', json=_payload('sync-duplicate-00000002'))
+            self.assertEqual(second.status_code, 201, second.text)
+            self.assertEqual(second.json()['id'], first.json()['id'])
+
+    def test_permit_suggestions_return_previous_server_permits(self) -> None:
+        with TestClient(app) as client:
+            created = client.post('/api/mobile/events', json=_payload('sync-suggest-000000001'))
+            self.assertEqual(created.status_code, 201, created.text)
+            response = client.get('/api/mobile/permit-suggestions', params={'q': 'ПОДСК'})
+            self.assertEqual(response.status_code, 200, response.text)
+            rows = response.json()
+            self.assertTrue(any(row['permit_number'] == 'НД-ПОДСКАЗКА-2908' for row in rows))
+            match = next(row for row in rows if row['permit_number'] == 'НД-ПОДСКАЗКА-2908')
+            self.assertEqual(match['worker_name'], 'Иванов Иван Иванович')
+            self.assertEqual(match['structural_unit'], 'ЦДПН-1')
 
 
-def test_permit_suggestions_return_previous_server_permits():
-    with TestClient(app) as client:
-        client.post('/api/mobile/events', json=_payload('sync-suggest-000000001'))
-        response = client.get('/api/mobile/permit-suggestions', params={'q': 'ПОДСК'})
-        assert response.status_code == 200, response.text
-        rows = response.json()
-        assert any(row['permit_number'] == 'НД-ПОДСКАЗКА-2908' for row in rows)
-        match = next(row for row in rows if row['permit_number'] == 'НД-ПОДСКАЗКА-2908')
-        assert match['worker_name'] == 'Иванов Иван Иванович'
-        assert match['structural_unit'] == 'ЦДПН-1'
+if __name__ == '__main__':
+    unittest.main()
