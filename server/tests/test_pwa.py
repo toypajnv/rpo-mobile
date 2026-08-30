@@ -15,6 +15,7 @@ class PwaStaticTests(unittest.TestCase):
     def test_pwa_shell_contains_install_offline_and_approval_features(self) -> None:
         html = (self.pwa_dir / "index.html").read_text(encoding="utf-8")
         js = (self.pwa_dir / "app.js").read_text(encoding="utf-8")
+        ux = (self.pwa_dir / "ux.js").read_text(encoding="utf-8")
         sw = (self.pwa_dir / "sw.js").read_text(encoding="utf-8")
         manifest = json.loads((self.pwa_dir / "manifest.webmanifest").read_text(encoding="utf-8"))
 
@@ -35,7 +36,9 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('Работы можно проводить', js)
         self.assertIn('ЦДПН-1', js)
         self.assertIn('Замена исполнителей работ', js)
-        self.assertIn("const CACHE='rpo-pwa-shell-v1.0.1'", sw)
+        self.assertIn('Следующее действие', ux)
+        self.assertIn('history-search', ux)
+        self.assertIn("const CACHE='rpo-pwa-shell-v1.1.0'", sw)
         self.assertEqual(manifest['start_url'], '/app/')
         self.assertEqual(manifest['scope'], '/app/')
         self.assertEqual(manifest['display'], 'standalone')
@@ -68,16 +71,16 @@ class PwaStaticTests(unittest.TestCase):
 
             self.assertEqual(client.get('/app/icon-256.png').status_code, 404)
 
-    def test_mobile_config_advertises_pwa_without_changing_android_contract(self) -> None:
+    def test_mobile_config_advertises_pwa_and_new_android_without_forcing_update(self) -> None:
         with TestClient(app) as client:
             response = client.get('/api/mobile/config?app_version=1.0.1')
             self.assertEqual(response.status_code, 200)
             data = response.json()
-            self.assertEqual(data['latest_app_version'], '2.0.1')
+            self.assertEqual(data['latest_app_version'], '2.1.0')
             self.assertFalse(data['update_required'])
-            self.assertEqual(data['pwa_version'], '1.0.1')
+            self.assertEqual(data['pwa_version'], '1.1.0')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
-            self.assertEqual(data['server_version'], '0.5.2')
+            self.assertEqual(data['server_version'], '0.6.0')
 
 
 if __name__ == '__main__':
