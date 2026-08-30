@@ -29,6 +29,7 @@
   nativeStageCard?.classList.add('ux-native-stage-card');
 
   let historyFilter = 'all';
+  let refreshQueued = false;
 
   function validPermit() {
     return permit.value.trim().length >= 3 && worker.value.trim().length >= 3 && unit.value;
@@ -94,19 +95,14 @@
       </div>
       <div class="ux-next-action">
         <div><small>Следующее действие</small><b id="ux-next-action-label">—</b></div>
-        <button type="button" id="ux-next-open" hidden>Открыть</button>
       </div>`;
     formCard.insertAdjacentElement('afterend', overview);
     $('ux-overview-edit').addEventListener('click', () => {
+      const willOpen = formCard.classList.contains('ux-collapsed');
       formCard.classList.toggle('ux-collapsed');
-      if (!formCard.classList.contains('ux-collapsed')) permit.focus({preventScroll:false});
-    });
-    $('ux-next-open').addEventListener('click', () => {
-      const next = recommendedStage();
-      if (!next) return;
-      stageSelect.value = next.id;
-      stageSelect.dispatchEvent(new Event('change', {bubbles:true}));
-      stageFields.scrollIntoView({behavior:'smooth', block:'start'});
+      if (willOpen) {
+        requestAnimationFrame(() => formCard.scrollIntoView({behavior:'smooth', block:'start'}));
+      }
     });
   }
 
@@ -124,8 +120,6 @@
     const next = recommendedStage();
     const nextLabel = approvalStatus() === 'stopped' ? 'Возобновление работ' : next ? next.title : 'Обязательные этапы заполнены';
     $('ux-next-action-label').textContent = nextLabel;
-    const open = $('ux-next-open');
-    open.hidden = !next || next.id === stageSelect.value;
     if (!formCard.dataset.uxCollapsedOnce) {
       formCard.dataset.uxCollapsedOnce = '1';
       formCard.classList.add('ux-collapsed');
@@ -157,13 +151,11 @@
     rail.querySelectorAll('[data-ux-stage]').forEach(button => button.addEventListener('click', () => {
       stageSelect.value = button.dataset.uxStage;
       stageSelect.dispatchEvent(new Event('change', {bubbles:true}));
+      requestAnimationFrame(() => stageFields.scrollIntoView({behavior:'smooth', block:'start'}));
     }));
-    const active = rail.querySelector('.ux-stage-chip.active');
-    active?.scrollIntoView({behavior:'smooth', block:'nearest', inline:'center'});
   }
 
   function sentNote() {
-    stageFields.querySelector('.ux-sent-note')?.remove();
     const stage = selectedStageMeta();
     let text = '';
     if (optionDone(stage.id)) {
@@ -171,11 +163,19 @@
     } else if (stage.kind === 'range' && $('primary-date')?.value && $('primary-time')?.value && !$('secondary-date')?.value && !$('secondary-time')?.value && approvalStatus() !== 'none') {
       text = 'Начало уже заполнено. При передаче окончания повторно отправятся только новые данные.';
     }
-    if (!text) return;
-    const note = document.createElement('div');
+
+    const existing = stageFields.querySelector('.ux-sent-note');
+    if (!text) {
+      existing?.remove();
+      return;
+    }
+    if (existing?.dataset.message === text) return;
+
+    const note = existing || document.createElement('div');
     note.className = 'ux-sent-note';
+    note.dataset.message = text;
     note.innerHTML = `<b>✓</b><span>${text}</span>`;
-    stageFields.querySelector('.subtitle')?.insertAdjacentElement('afterend', note);
+    if (!existing) stageFields.querySelector('.subtitle')?.insertAdjacentElement('afterend', note);
   }
 
   function readinessText() {
@@ -200,13 +200,16 @@
     const ready = Boolean($('check-worker')?.classList.contains('ok') && $('check-unit')?.classList.contains('ok') && $('check-permit')?.classList.contains('ok') && $('check-stage')?.classList.contains('ok'));
     checklist.classList.toggle('ready', ready);
     checklist.classList.toggle('needs-input', !ready);
-    status.innerHTML = `<b>${ready?'✓':'!'}</b><span>${readinessText()}</span>`;
+    const nextHtml = `<b>${ready?'✓':'!'}</b><span>${readinessText()}</span>`;
+    if (status.innerHTML !== nextHtml) status.innerHTML = nextHtml;
   }
 
   function updateActionButton() {
     const span = saveButton.querySelector('span:last-child');
-    if (span) span.textContent = contextualAction();
-    else saveButton.textContent = contextualAction();
+    const label = contextualAction();
+    if (span) {
+      if (span.textContent !== label) span.textContent = label;
+    } else if (saveButton.textContent !== label) saveButton.textContent = label;
   }
 
   function updateConnectionBadge() {
@@ -216,7 +219,8 @@
     const failed = queue && !queue.hidden && /ошиб/i.test($('queue-text')?.textContent || '');
     const online = navigator.onLine;
     const dotClass = failed ? 'error' : online ? '' : 'offline';
-    badge.innerHTML = `<span class="ux-status-dot ${dotClass}"></span>${failed?'Проверить':online?'Готово':'Офлайн'}`;
+    const html = `<span class="ux-status-dot ${dotClass}"></span>${failed?'Проверить':online?'Готово':'Офлайн'}`;
+    if (badge.innerHTML !== html) badge.innerHTML = html;
   }
 
   function createHistoryTools() {
@@ -256,23 +260,59 @@
     applyHistoryFilter();
   }
 
+  function scheduleRefresh() {
+    if (refreshQueued) return;
+    refreshQueued = true;
+    queueMicrotask(() => {
+      refreshQueued = false;
+      refreshUx();
+    });
+  }
+
+  function restoreVisibleScreen() {
+    if (!document.querySelector('.screen.active')) {
+      $('tab-form')?.classList.add('active');
+      document.querySelector('.nav-item[data-tab="form"]')?.classList.add('active');
+    }
+    document.documentElement.classList.remove('ux-resuming');
+    document.body.style.visibility = 'visible';
+    scheduleRefresh();
+  }
+
   createOverview();
   createStageRail();
   createHistoryTools();
 
   ['input','change'].forEach(type => document.addEventListener(type, event => {
-    if (event.target.closest?.('#tab-form')) queueMicrotask(refreshUx);
-  }));
-  window.addEventListener('online', refreshUx);
-  window.addEventListener('offline', refreshUx);
-  document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => setTimeout(refreshUx, 0)));
+    if (!event.target.closest?.('#tab-form')) return;
 
-  new MutationObserver(() => queueMicrotask(refreshUx)).observe(stageSelect, {childList:true, subtree:true, characterData:true});
-  new MutationObserver(() => queueMicrotask(refreshUx)).observe(stageFields, {childList:true, subtree:true});
-  if (approvalCard) new MutationObserver(() => queueMicrotask(refreshUx)).observe(approvalCard, {attributes:true, childList:true, subtree:true});
+    // iOS date/time controls may commit with only `change`. The core form
+    // validator listens to `input`, so mirror the committed change once.
+    if (type === 'change' && event.target.closest?.('#stage-fields') && event.target.matches?.('input,textarea,select')) {
+      event.target.dispatchEvent(new Event('input', {bubbles:true}));
+    }
+    scheduleRefresh();
+  }));
+
+  window.addEventListener('online', scheduleRefresh);
+  window.addEventListener('offline', scheduleRefresh);
+  window.addEventListener('pageshow', () => {
+    document.documentElement.classList.add('ux-resuming');
+    requestAnimationFrame(restoreVisibleScreen);
+    setTimeout(restoreVisibleScreen, 120);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') requestAnimationFrame(restoreVisibleScreen);
+  });
+  document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => setTimeout(scheduleRefresh, 0)));
+
+  // Stage options are rebuilt after server sync. Watching only the select avoids
+  // a feedback loop where the UX note mutates stageFields and retriggers itself.
+  new MutationObserver(scheduleRefresh).observe(stageSelect, {childList:true, subtree:true, characterData:true});
+  if (approvalCard) new MutationObserver(scheduleRefresh).observe(approvalCard, {attributes:true, childList:true, subtree:true});
   const historyList = $('history-list');
   if (historyList) new MutationObserver(() => queueMicrotask(applyHistoryFilter)).observe(historyList, {childList:true, subtree:true});
 
-  setTimeout(refreshUx, 0);
+  setTimeout(restoreVisibleScreen, 0);
   setInterval(updateConnectionBadge, 3000);
 })();
