@@ -38,11 +38,26 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('Замена исполнителей работ', js)
         self.assertIn('Следующее действие', ux)
         self.assertIn('history-search', ux)
-        self.assertIn("const CACHE='rpo-pwa-shell-v1.1.0'", sw)
+        self.assertIn("const CACHE='rpo-pwa-shell-v1.1.1'", sw)
         self.assertEqual(manifest['start_url'], '/app/')
         self.assertEqual(manifest['scope'], '/app/')
         self.assertEqual(manifest['display'], 'standalone')
         self.assertEqual({icon['sizes'] for icon in manifest['icons']}, {'192x192', '512x512'})
+
+    def test_ios_hotfix_prevents_render_loop_and_revalidates_native_date_change(self) -> None:
+        html = (self.pwa_dir / "index.html").read_text(encoding="utf-8")
+        ux = (self.pwa_dir / "ux.js").read_text(encoding="utf-8")
+        sw = (self.pwa_dir / "sw.js").read_text(encoding="utf-8")
+
+        self.assertIn("window.addEventListener('pageshow'", ux)
+        self.assertIn("document.addEventListener('visibilitychange'", ux)
+        self.assertIn("event.target.dispatchEvent(new Event('input'", ux)
+        self.assertNotIn("observe(stageFields", ux)
+        self.assertIn("note.dataset.message = text", ux)
+        self.assertNotIn('ux-next-open', ux)
+        self.assertIn('Переходить между этапами можно сразу', html)
+        self.assertIn('/pwa-assets/ux.js?v=20260830-2', html)
+        self.assertIn('/pwa-assets/ux.js?v=20260830-2', sw)
 
     def test_pwa_routes_and_icons_are_served(self) -> None:
         with TestClient(app) as client:
@@ -78,7 +93,7 @@ class PwaStaticTests(unittest.TestCase):
             data = response.json()
             self.assertEqual(data['latest_app_version'], '2.1.0')
             self.assertFalse(data['update_required'])
-            self.assertEqual(data['pwa_version'], '1.1.0')
+            self.assertEqual(data['pwa_version'], '1.1.1')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
             self.assertEqual(data['server_version'], '0.6.0')
 
