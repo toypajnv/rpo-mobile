@@ -46,4 +46,12 @@ class StagesTest {
         assertEquals(keys.size, keys.toSet().size)
         assertTrue(keys.containsAll(listOf("AT", "AU", "AV", "AY", "BC", "AZ", "BA", "BE", "RI")))
     }
+
+    @Test
+    fun groupedStageIsCompleteOnlyAfterStartAndFinishExist() {
+        assertFalse("PREPARATION" in savedStageIdsForFieldKeys(setOf("AT")))
+        assertTrue("PREPARATION" in savedStageIdsForFieldKeys(setOf("AT", "AU")))
+        assertFalse("ACTUAL_WORK" in savedStageIdsForFieldKeys(setOf("AY")))
+        assertTrue("ACTUAL_WORK" in savedStageIdsForFieldKeys(setOf("AY", "BC")))
+    }
 }

@@ -13,13 +13,14 @@
   <link rel="apple-touch-icon" href="/app/icon-180.png">
   <link rel="icon" sizes="192x192" href="/app/icon-192.png">
   <link rel="stylesheet" href="/pwa-assets/app.css?v=20260829-2">
+  <link rel="stylesheet" href="/pwa-assets/ux.css?v=20260830-1">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-mark" aria-hidden="true">РПО</div>
       <div class="brand-copy"><strong>РПО</strong><span>Работы повышенной опасности</span></div>
-      <div class="no-login"><i></i> Без входа</div>
+      <div class="no-login"><i></i> Готово</div>
     </header>
 
     <main id="main" class="main-content">
@@ -63,7 +64,7 @@
             <div id="permit-suggestion-menu" class="permit-suggestion-menu" hidden></div>
             <button id="permit-refresh" class="field-action" type="button" aria-label="Загрузить данные НД">↻</button>
           </div>
-          <div class="field-hint">При точном совпадении ранее заполненные данные автоматически загружаются с сервера.</div>
+          <div class="field-hint">Введите часть номера: приложение покажет ранее заполненные НД и загрузит данные с сервера.</div>
           <div class="field-error" id="permit-error"></div>
         </section>
 
@@ -80,10 +81,10 @@
 
         <section id="stage-fields" class="card stage-card"></section>
 
-        <button id="save-stage" class="primary-button" type="button"><span class="button-icon">✓</span><span>Сохранить этап</span></button>
+        <button id="save-stage" class="primary-button" type="button"><span class="button-icon">✓</span><span>Передать данные этапа</span></button>
 
         <section class="card checklist">
-          <strong>Проверка заполнения</strong>
+          <strong>Готовность к передаче</strong>
           <div id="check-worker" class="check-line"><span>○</span> ФИО указано</div>
           <div id="check-unit" class="check-line"><span>○</span> Подразделение выбрано</div>
           <div id="check-permit" class="check-line"><span>○</span> Номер НД корректен</div>
@@ -94,7 +95,7 @@
       </section>
 
       <section id="tab-history" class="screen" data-screen="history">
-        <div class="page-heading"><h1>История</h1><p>Последние наряды-допуски этого устройства</p></div>
+        <div class="page-heading"><h1>История</h1><p>Наряды-допуски этого устройства с поиском и статусами</p></div>
         <div id="history-list" class="history-list"></div>
         <button id="history-refresh" class="secondary-button" type="button">Обновить историю</button>
       </section>
@@ -105,18 +106,21 @@
           <h2>Установка на iPhone</h2>
           <ol><li>Откройте эту страницу именно в Safari.</li><li>Нажмите кнопку «Поделиться» в Safari.</li><li>Выберите «На экран Домой».</li><li>Подтвердите «Добавить».</li></ol>
         </section>
+        <section class="card help-card"><h2>Работайте по следующему действию</h2><p>После выбора НД приложение показывает ход наряда и рекомендуемый следующий этап. Любой этап можно открыть вручную в горизонтальной ленте.</p></section>
+        <section class="card help-card"><h2>Передавайте только новое</h2><p>Если начало этапа уже находится на сервере, при заполнении окончания повторно передаются только новые или изменённые данные.</p></section>
         <section class="card help-card"><h2>Работа без интернета</h2><p>Если сеть пропала, заполненные события сохраняются на устройстве. РПО повторит отправку при следующем открытии приложения или после восстановления сети.</p></section>
         <section class="card help-card"><h2>Разрешение оператора</h2><p>После передачи этапа появится статус «Ожидает разрешения». Когда оператор подтвердит этап на сервере, статус автоматически изменится на «Работы можно проводить». Остановка работ подтверждения не требует.</p></section>
-        <section class="card help-card"><h2>Версия</h2><p>PWA 1.0.1 · единая система с Android РПО 2.0.1.</p></section>
+        <section class="card help-card"><h2>Версия</h2><p>PWA 1.1.0 · единая система с Android РПО 2.1.0. Предыдущая версия сохранена для отката.</p></section>
       </section>
     </main>
 
     <nav class="bottom-nav" aria-label="Основная навигация">
-      <button type="button" class="nav-item active" data-tab="form"><span>▣</span><b>Форма</b></button>
+      <button type="button" class="nav-item active" data-tab="form"><span>▣</span><b>Работа</b></button>
       <button type="button" class="nav-item" data-tab="history"><span>◷</span><b>История</b></button>
       <button type="button" class="nav-item" data-tab="help"><span>?</span><b>Справка</b></button>
     </nav>
   </div>
   <script src="/pwa-assets/app.js?v=20260829-2" defer></script>
+  <script src="/pwa-assets/ux.js?v=20260830-1" defer></script>
 </body>
 </html>

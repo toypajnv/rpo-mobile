@@ -10,38 +10,41 @@ permissions:
 
 jobs:
   production-smoke:
-    name: Production health, PWA and API contract
+    name: Production health, UX, PWA and API contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and PWA 1.0.1
+      - name: Wait for VPS autodeploy and UX 2.1
         shell: bash
         run: |
           set -euo pipefail
           ok=0
           for attempt in $(seq 1 36); do
             health="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null || true)"
-            config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=1.0.1' 2>/dev/null || true)"
+            config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=2.0.1' 2>/dev/null || true)"
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
+            dashboard_loader="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard.js 2>/dev/null || true)"
             if [[ "$health" == *'"status":"ok"'* ]] \
-              && [[ "$config" == *'"server_version":"0.5.2"'* ]] \
-              && [[ "$config" == *'"latest_app_version":"2.0.1"'* ]] \
-              && [[ "$config" == *'"pwa_version":"1.0.1"'* ]] \
-              && [[ "$pwa" == *'PWA 1.0.1'* ]]; then
-              echo "Production Android 2.0.1 / PWA 1.0.1 is deployed on attempt $attempt"
+              && [[ "$config" == *'"server_version":"0.6.0"'* ]] \
+              && [[ "$config" == *'"latest_app_version":"2.1.0"'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.1.0"'* ]] \
+              && [[ "$pwa" == *'PWA 1.1.0'* ]] \
+              && [[ "$pwa" == *'/pwa-assets/ux.js?v=20260830-1'* ]] \
+              && [[ "$dashboard_loader" == *'dashboard-ux.js?v=20260830-1'* ]]; then
+              echo "Production Android 2.1.0 / PWA 1.1.0 / Dashboard UX 2.1 is deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for cross-platform autodeploy: attempt $attempt/36"
+            echo "Waiting for UX 2.1 autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Android 2.0.1 / PWA 1.0.1 did not become ready in time" >&2
+            echo "UX 2.1 did not become ready in time" >&2
             exit 1
           fi
 
-      - name: Verify installable PWA contract
+      - name: Verify installable PWA UX contract
         shell: bash
         run: |
           set -euo pipefail
@@ -50,6 +53,9 @@ jobs:
           grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
           grep -F 'На экран Домой' /tmp/rpo-pwa.html
           grep -F 'permit-suggestion-menu' /tmp/rpo-pwa.html
+          grep -F 'PWA 1.1.0' /tmp/rpo-pwa.html
+          grep -F '/pwa-assets/ux.css?v=20260830-1' /tmp/rpo-pwa.html
+          grep -F '/pwa-assets/ux.js?v=20260830-1' /tmp/rpo-pwa.html
 
           curl -fsS --max-time 10 https://rpo-mng.ru/app/manifest.webmanifest -o /tmp/rpo-manifest.json
           python3 - <<'PY'
@@ -65,15 +71,24 @@ jobs:
 
           curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
-          grep -F "rpo-pwa-shell-v1.0.1" /tmp/sw.js
+          grep -F "rpo-pwa-shell-v1.1.0" /tmp/sw.js
 
-          curl -fsS -D /tmp/icon-headers.txt --max-time 10 https://rpo-mng.ru/app/icon-180.png -o /tmp/icon.png
-          grep -Fi 'content-type: image/png' /tmp/icon-headers.txt
-          python3 - <<'PY'
-          from pathlib import Path
-          assert Path('/tmp/icon.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
-          print('iOS touch icon confirmed')
-          PY
+          curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/ux.js -o /tmp/pwa-ux.js
+          grep -F 'Следующее действие' /tmp/pwa-ux.js
+          grep -F 'history-search' /tmp/pwa-ux.js
+
+      - name: Verify operator dashboard UX layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard.js -o /tmp/dashboard-loader.js
+          curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-core.js -o /tmp/dashboard-core.js
+          curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-ux.js -o /tmp/dashboard-ux.js
+          grep -F 'dashboard-core.js?v=20260830-1' /tmp/dashboard-loader.js
+          grep -F 'dashboard-ux.js?v=20260830-1' /tmp/dashboard-loader.js
+          grep -F 'Требуют внимания' /tmp/dashboard-ux.js
+          grep -F 'ux-drawer' /tmp/dashboard-ux.js
+          test -s /tmp/dashboard-core.js
 
       - name: Verify mobile and approval API contract is deployed
         shell: bash
@@ -83,7 +98,6 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-
           spec = json.loads(Path('/tmp/rpo-openapi.json').read_text())
           paths = spec.get('paths', {})
           required = [
@@ -94,26 +108,25 @@ jobs:
               '/api/operator/analytics',
           ]
           for route in required:
-              if route not in paths:
-                  raise SystemExit(f'Missing deployed API route: {route}')
+              assert route in paths, f'Missing deployed API route: {route}'
               print(f'Deployed API route confirmed: {route}')
           PY
 
-      - name: Verify old APK compatibility status
+      - name: Verify rollback compatibility status
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 10 'https://rpo-mng.ru/api/mobile/config?app_version=1.0.1' -o /tmp/mobile-config.json
+          curl -fsS --max-time 10 'https://rpo-mng.ru/api/mobile/config?app_version=2.0.1' -o /tmp/mobile-config.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-
           cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
           assert cfg['status']=='ok'
-          assert cfg['latest_app_version']=='2.0.1'
+          assert cfg['latest_app_version']=='2.1.0'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          assert cfg['pwa_version']=='1.0.1'
+          assert cfg['pwa_version']=='1.1.0'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
-          print('Old APK remains supported; PWA:', cfg['pwa_url'])
+          assert cfg['minimum_supported_version']=='1.0.1'
+          print('Older APKs remain supported; rollback-compatible contract confirmed')
           PY

@@ -67,10 +67,11 @@ val requiredStageCount: Int = requiredStages.size
 
 fun savedStageCount(savedStageIds: Set<String>): Int = requiredStages.count { it.id in savedStageIds }
 
+/** A grouped stage is complete only when every event that belongs to it exists on the server. */
 fun savedStageIdsForFieldKeys(fieldKeys: Set<String>): Set<String> = stages
     .filter { stage ->
         val keys = listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key)
-        if (stage.kind == StageKind.RANGE_DATETIME) stage.first.key in fieldKeys else keys.all { it in fieldKeys }
+        keys.all { it in fieldKeys }
     }
     .map { it.id }
     .toSet()

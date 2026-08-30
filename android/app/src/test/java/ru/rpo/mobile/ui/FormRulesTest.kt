@@ -61,13 +61,20 @@ class FormRulesTest {
     }
 
     @Test
-    fun serverFieldsMapToCompletedUserStages() {
-        val ids = savedStageIdsForFieldKeys(setOf("AT", "AV", "AY", "BE"))
-        assertTrue("PREPARATION" in ids)
-        assertTrue("TRANSFER_WORK" in ids)
-        assertTrue("ACTUAL_WORK" in ids)
-        assertTrue("EXTEND_WORK" in ids)
+    fun serverFieldsMapOnlyFullyCompletedGroupedStages() {
+        val partialIds = savedStageIdsForFieldKeys(setOf("AT", "AV", "AY", "BE"))
+        assertFalse("PREPARATION" in partialIds)
+        assertTrue("TRANSFER_WORK" in partialIds)
+        assertFalse("ACTUAL_WORK" in partialIds)
+        assertTrue("EXTEND_WORK" in partialIds)
+
+        val completedIds = savedStageIdsForFieldKeys(setOf("AT", "AU", "AV", "AY", "BC", "BE"))
+        assertTrue("PREPARATION" in completedIds)
+        assertTrue("TRANSFER_WORK" in completedIds)
+        assertTrue("ACTUAL_WORK" in completedIds)
+        assertTrue("EXTEND_WORK" in completedIds)
     }
+
     @Test
     fun unchangedServerFieldIsNotSentAgain() {
         assertFalse(shouldSendStageField("29.08.2026 10:00", "", "29.08.2026 10:00", ""))
@@ -75,5 +82,4 @@ class FormRulesTest {
         assertTrue(shouldSendStageField("29.08.2026 10:00", "Старый", "29.08.2026 10:00", "Новый"))
         assertTrue(shouldSendStageField(null, null, "29.08.2026 10:00", ""))
     }
-
 }
