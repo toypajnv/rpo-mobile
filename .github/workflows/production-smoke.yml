@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and UX 2.1
+      - name: Wait for VPS autodeploy and iOS PWA hotfix
         shell: bash
         run: |
           set -euo pipefail
@@ -28,23 +28,23 @@ jobs:
             if [[ "$health" == *'"status":"ok"'* ]] \
               && [[ "$config" == *'"server_version":"0.6.0"'* ]] \
               && [[ "$config" == *'"latest_app_version":"2.1.0"'* ]] \
-              && [[ "$config" == *'"pwa_version":"1.1.0"'* ]] \
-              && [[ "$pwa" == *'PWA 1.1.0'* ]] \
-              && [[ "$pwa" == *'/pwa-assets/ux.js?v=20260830-1'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.1.1"'* ]] \
+              && [[ "$pwa" == *'PWA 1.1.1'* ]] \
+              && [[ "$pwa" == *'/pwa-assets/ux.js?v=20260830-2'* ]] \
               && [[ "$dashboard_loader" == *'dashboard-ux.js?v=20260830-1'* ]]; then
-              echo "Production Android 2.1.0 / PWA 1.1.0 / Dashboard UX 2.1 is deployed on attempt $attempt"
+              echo "Production Android 2.1.0 / PWA 1.1.1 iOS hotfix / Dashboard UX 2.1 is deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for UX 2.1 autodeploy: attempt $attempt/36"
+            echo "Waiting for iOS PWA hotfix autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "UX 2.1 did not become ready in time" >&2
+            echo "iOS PWA hotfix did not become ready in time" >&2
             exit 1
           fi
 
-      - name: Verify installable PWA UX contract
+      - name: Verify installable PWA iOS hotfix contract
         shell: bash
         run: |
           set -euo pipefail
@@ -53,9 +53,10 @@ jobs:
           grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
           grep -F 'На экран Домой' /tmp/rpo-pwa.html
           grep -F 'permit-suggestion-menu' /tmp/rpo-pwa.html
-          grep -F 'PWA 1.1.0' /tmp/rpo-pwa.html
+          grep -F 'PWA 1.1.1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/ux.css?v=20260830-1' /tmp/rpo-pwa.html
-          grep -F '/pwa-assets/ux.js?v=20260830-1' /tmp/rpo-pwa.html
+          grep -F '/pwa-assets/ux.js?v=20260830-2' /tmp/rpo-pwa.html
+          grep -F 'Переходить между этапами можно сразу' /tmp/rpo-pwa.html
 
           curl -fsS --max-time 10 https://rpo-mng.ru/app/manifest.webmanifest -o /tmp/rpo-manifest.json
           python3 - <<'PY'
@@ -71,11 +72,22 @@ jobs:
 
           curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
-          grep -F "rpo-pwa-shell-v1.1.0" /tmp/sw.js
+          grep -F "rpo-pwa-shell-v1.1.1" /tmp/sw.js
+          grep -F '/pwa-assets/ux.js?v=20260830-2' /tmp/sw.js
 
           curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/ux.js -o /tmp/pwa-ux.js
           grep -F 'Следующее действие' /tmp/pwa-ux.js
           grep -F 'history-search' /tmp/pwa-ux.js
+          grep -F "window.addEventListener('pageshow'" /tmp/pwa-ux.js
+          grep -F "event.target.dispatchEvent(new Event('input'" /tmp/pwa-ux.js
+          if grep -Fq 'observe(stageFields' /tmp/pwa-ux.js; then
+            echo 'Unsafe stageFields MutationObserver loop is still deployed' >&2
+            exit 1
+          fi
+          if grep -Fq 'ux-next-open' /tmp/pwa-ux.js; then
+            echo 'Removed Open button is still deployed' >&2
+            exit 1
+          fi
 
       - name: Verify operator dashboard UX layer
         shell: bash
@@ -125,7 +137,7 @@ jobs:
           assert cfg['latest_app_version']=='2.1.0'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          assert cfg['pwa_version']=='1.1.0'
+          assert cfg['pwa_version']=='1.1.1'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
           assert cfg['minimum_supported_version']=='1.0.1'
           print('Older APKs remain supported; rollback-compatible contract confirmed')
