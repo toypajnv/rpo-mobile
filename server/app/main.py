@@ -7,7 +7,12 @@ all routes from the preserved core.
 """
 
 from . import main_core as _core
-from .main_core import *  # noqa: F401,F403
+
+# Re-export the complete historical module surface, including private helper
+# functions used by regression tests and maintenance scripts.
+for _name in dir(_core):
+    if not _name.startswith("__"):
+        globals()[_name] = getattr(_core, _name)
 
 LATEST_MOBILE_VERSION = "2.1.0"
 MIN_SUPPORTED_MOBILE_VERSION = _core.MIN_SUPPORTED_MOBILE_VERSION
