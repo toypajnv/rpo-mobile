@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and iOS PWA hotfix
+      - name: Wait for VPS autodeploy and PWA server-confirmation hotfix
         shell: bash
         run: |
           set -euo pipefail
@@ -28,23 +28,24 @@ jobs:
             if [[ "$health" == *'"status":"ok"'* ]] \
               && [[ "$config" == *'"server_version":"0.6.0"'* ]] \
               && [[ "$config" == *'"latest_app_version":"2.1.0"'* ]] \
-              && [[ "$config" == *'"pwa_version":"1.1.1"'* ]] \
-              && [[ "$pwa" == *'PWA 1.1.1'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.1.2"'* ]] \
+              && [[ "$pwa" == *'PWA 1.1.2'* ]] \
+              && [[ "$pwa" == *'/pwa-assets/sync-status.js?v=20260831-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/ux.js?v=20260830-2'* ]] \
               && [[ "$dashboard_loader" == *'dashboard-ux.js?v=20260830-1'* ]]; then
-              echo "Production Android 2.1.0 / PWA 1.1.1 iOS hotfix / Dashboard UX 2.1 is deployed on attempt $attempt"
+              echo "Production Android 2.1.0 / PWA 1.1.2 server-confirmation hotfix / Dashboard UX 2.1 is deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for iOS PWA hotfix autodeploy: attempt $attempt/36"
+            echo "Waiting for PWA 1.1.2 autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "iOS PWA hotfix did not become ready in time" >&2
+            echo "PWA 1.1.2 did not become ready in time" >&2
             exit 1
           fi
 
-      - name: Verify installable PWA iOS hotfix contract
+      - name: Verify installable PWA transmission status contract
         shell: bash
         run: |
           set -euo pipefail
@@ -53,10 +54,10 @@ jobs:
           grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
           grep -F 'На экран Домой' /tmp/rpo-pwa.html
           grep -F 'permit-suggestion-menu' /tmp/rpo-pwa.html
-          grep -F 'PWA 1.1.1' /tmp/rpo-pwa.html
-          grep -F '/pwa-assets/ux.css?v=20260830-1' /tmp/rpo-pwa.html
+          grep -F 'PWA 1.1.2' /tmp/rpo-pwa.html
+          grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/ux.js?v=20260830-2' /tmp/rpo-pwa.html
-          grep -F 'Переходить между этапами можно сразу' /tmp/rpo-pwa.html
+          grep -F 'Зелёный статус «Передано» появляется только после подтверждения приёма сервером.' /tmp/rpo-pwa.html
 
           curl -fsS --max-time 10 https://rpo-mng.ru/app/manifest.webmanifest -o /tmp/rpo-manifest.json
           python3 - <<'PY'
@@ -72,8 +73,16 @@ jobs:
 
           curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
-          grep -F "rpo-pwa-shell-v1.1.1" /tmp/sw.js
-          grep -F '/pwa-assets/ux.js?v=20260830-2' /tmp/sw.js
+          grep -F "rpo-pwa-shell-v1.1.2" /tmp/sw.js
+          grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/sw.js
+
+          curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/sync-status.js -o /tmp/pwa-sync-status.js
+          grep -F "const SAVED_KEY = 'rpo_pwa_saved_v1'" /tmp/pwa-sync-status.js
+          grep -F 'nativeRemoveItem.call(localStorage, SAVED_KEY)' /tmp/pwa-sync-status.js
+          grep -F 'Ошибка передачи на сервер' /tmp/pwa-sync-status.js
+          grep -F 'До подтверждения сервера этап не считается переданным' /tmp/pwa-sync-status.js
+          grep -F "button.textContent = 'Исправить'" /tmp/pwa-sync-status.js
+          grep -F 'event.stopImmediatePropagation()' /tmp/pwa-sync-status.js
 
           curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/ux.js -o /tmp/pwa-ux.js
           grep -F 'Следующее действие' /tmp/pwa-ux.js
@@ -137,7 +146,7 @@ jobs:
           assert cfg['latest_app_version']=='2.1.0'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          assert cfg['pwa_version']=='1.1.1'
+          assert cfg['pwa_version']=='1.1.2'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
           assert cfg['minimum_supported_version']=='1.0.1'
           print('Older APKs remain supported; rollback-compatible contract confirmed')
