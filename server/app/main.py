@@ -17,7 +17,7 @@ for _name in dir(_core):
 LATEST_MOBILE_VERSION = "2.1.0"
 MIN_SUPPORTED_MOBILE_VERSION = _core.MIN_SUPPORTED_MOBILE_VERSION
 MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.1.0-test/rpo-mobile-2.1.0.apk"
-PWA_VERSION = "1.1.1"
+PWA_VERSION = "1.1.2"
 PWA_URL = _core.PWA_URL
 
 _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
