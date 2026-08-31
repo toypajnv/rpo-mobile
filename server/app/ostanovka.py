@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .stop_registry import lookup_pass
+from .stop_registry import StopRegistryImport, lookup_pass
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -30,6 +31,9 @@ def ostanovka_page(request: Request):
 
 @router.post("/api/ostanovka/check")
 def ostanovka_check(payload: PassCheckRequest, db: Session = Depends(get_db)):
+    registry_ready = db.scalar(select(StopRegistryImport.id).limit(1))
+    if not registry_ready:
+        raise HTTPException(status_code=503, detail="Реестр остановок еще не загружен. Проверка временно недоступна.")
     try:
         result = lookup_pass(db, payload.pass_number)
     except ValueError as exc:
