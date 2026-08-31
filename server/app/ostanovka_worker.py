@@ -36,49 +36,61 @@ def process_message(raw_message: bytes) -> bool:
     message = email.message_from_bytes(raw_message)
     message_id = decoded(message.get("Message-ID"))
     sender = decoded(message.get("From"))
-    processed = False
+    attachments: list[tuple[str, bytes]] = []
     for part in message.walk():
         filename = decoded(part.get_filename())
         if not filename or not filename.lower().endswith(".xlsb"):
             continue
         payload = part.get_payload(decode=True)
-        if not payload:
-            continue
-        with tempfile.NamedTemporaryFile(prefix="stop-registry-", suffix=".xlsb", delete=False) as temp:
-            temp.write(payload)
-            temp_path = temp.name
-        try:
-            result = import_file(temp_path, file_name=filename, message_id=message_id, sender=sender)
-            log.info("registry imported duplicate=%s source_rows=%s indexed_rows=%s unique_passes=%s file=%s", result.duplicate, result.source_rows, result.indexed_rows, result.unique_passes, filename)
-            processed = True
-        finally:
-            Path(temp_path).unlink(missing_ok=True)
-    return processed
+        if payload:
+            attachments.append((filename, payload))
+
+    if not attachments:
+        return False
+    if len(attachments) != 1:
+        raise ValueError("Ожидалось ровно одно вложение .xlsb в письме")
+
+    filename, payload = attachments[0]
+    with tempfile.NamedTemporaryFile(prefix="stop-registry-", suffix=".xlsb", delete=False) as temp:
+        temp.write(payload)
+        temp_path = temp.name
+    try:
+        result = import_file(temp_path, file_name=filename, message_id=message_id, sender=sender)
+        log.info(
+            "registry imported duplicate=%s source_rows=%s indexed_rows=%s unique_passes=%s file=%s",
+            result.duplicate,
+            result.source_rows,
+            result.indexed_rows,
+            result.unique_passes,
+            filename,
+        )
+        return True
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
 
 
 def poll_once() -> int:
     host = os.getenv("STOP_IMAP_HOST", "").strip()
     username = os.getenv("STOP_IMAP_USERNAME", "").strip()
     password = os.getenv("STOP_IMAP_PASSWORD", "")
-    if not host or not username or not password:
-        log.warning("IMAP is not configured: STOP_IMAP_HOST/USERNAME/PASSWORD are required")
+    sender_filter = os.getenv("STOP_IMAP_SENDER", "").strip()
+    subject_filter = os.getenv("STOP_IMAP_SUBJECT", "").strip()
+    if not all((host, username, password, sender_filter, subject_filter)):
+        log.warning(
+            "IMAP import is disabled until STOP_IMAP_HOST, STOP_IMAP_USERNAME, STOP_IMAP_PASSWORD, "
+            "STOP_IMAP_SENDER and STOP_IMAP_SUBJECT are configured"
+        )
         return 0
 
     port = int(os.getenv("STOP_IMAP_PORT", "993"))
     folder = os.getenv("STOP_IMAP_FOLDER", "INBOX")
-    sender_filter = os.getenv("STOP_IMAP_SENDER", "").strip()
-    subject_filter = os.getenv("STOP_IMAP_SUBJECT", "").strip()
 
     with imaplib.IMAP4_SSL(host, port) as client:
         client.login(username, password)
         status, _ = client.select(folder)
         if status != "OK":
             raise RuntimeError(f"Cannot select IMAP folder {folder}")
-        criteria = ["UNSEEN"]
-        if sender_filter:
-            criteria += ["FROM", f'"{sender_filter}"']
-        if subject_filter:
-            criteria += ["SUBJECT", f'"{subject_filter}"']
+        criteria = ["UNSEEN", "FROM", f'"{sender_filter}"', "SUBJECT", f'"{subject_filter}"']
         status, data = client.uid("search", None, *criteria)
         if status != "OK":
             raise RuntimeError("IMAP search failed")
