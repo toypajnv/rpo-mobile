@@ -92,8 +92,10 @@ def _text(value: object) -> str:
 
 def normalize_pass_number(value: object) -> str:
     raw = unicodedata.normalize("NFKC", _text(value)).strip().upper()
-    # Remove the human label before replacing Cyrillic lookalike letters in the pass itself.
-    raw = re.sub(r"ПРОПУСК", "", raw, flags=re.IGNORECASE)
+    # Remove human-readable labels before replacing Cyrillic lookalike letters in the pass itself.
+    raw = re.sub(r"ПРОПУСК", "", raw, flags=re.IGNORECASE).strip()
+    # NFKC expands the numero sign № to "No", so accept № / No / Номер prefixes equally.
+    raw = re.sub(r"^(?:N[OО]\.?|НОМЕР)\s*", "", raw, flags=re.IGNORECASE)
     raw = raw.translate(CYR_LOOKALIKES)
     raw = raw.replace("№", " ").replace('"', " ").replace("'", " ")
     raw = re.sub(r"\s+", "", raw)
