@@ -24,7 +24,8 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.7.0"
+# The stop-registry feature is additive and does not change the existing mobile/API contract.
+_core.app.version = "0.6.0"
 
 app = _core.app
 
