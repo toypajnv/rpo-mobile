@@ -42,6 +42,24 @@ services:
     volumes:
       - server_data:/app/data
 
+  ostanovka-mail:
+    build: ./server
+    restart: unless-stopped
+    command: ["python", "-m", "app.ostanovka_worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://rpo:${POSTGRES_PASSWORD:-change_me}@db:5432/rpo
+      STOP_IMAP_HOST: ${STOP_IMAP_HOST:-}
+      STOP_IMAP_PORT: ${STOP_IMAP_PORT:-993}
+      STOP_IMAP_USERNAME: ${STOP_IMAP_USERNAME:-}
+      STOP_IMAP_PASSWORD: ${STOP_IMAP_PASSWORD:-}
+      STOP_IMAP_FOLDER: ${STOP_IMAP_FOLDER:-INBOX}
+      STOP_IMAP_SENDER: ${STOP_IMAP_SENDER:-}
+      STOP_IMAP_SUBJECT: ${STOP_IMAP_SUBJECT:-}
+      STOP_IMAP_POLL_SECONDS: ${STOP_IMAP_POLL_SECONDS:-60}
+
 volumes:
   postgres_data:
   server_data:
