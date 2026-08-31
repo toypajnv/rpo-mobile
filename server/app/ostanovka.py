@@ -21,7 +21,7 @@ class PassCheckRequest(BaseModel):
     pass_number: str = Field(min_length=2, max_length=40)
 
 
-def _apply_access_policy(result: dict, record: StopRegistryRecord | None) -> dict:
+def _apply_access_policy(result: dict, record: StopRegistryRecord | None, *, reason_override: str | None = None) -> dict:
     """Apply the business rule for access to the facility.
 
     Only an explicit value containing "Запрещен" blocks access. An empty field,
@@ -42,7 +42,7 @@ def _apply_access_policy(result: dict, record: StopRegistryRecord | None) -> dic
             "requirements": [],
         }
 
-    reason = (record.stop_reason or "").strip()
+    reason = (reason_override if reason_override is not None else (record.stop_reason or "")).strip()
     return {
         **result,
         "status": "denied",
@@ -50,6 +50,25 @@ def _apply_access_policy(result: dict, record: StopRegistryRecord | None) -> dic
         "message": f"Причина: {reason}" if reason else "Причина запрета в реестре не указана.",
         "reason": reason,
     }
+
+
+def _resolve_denial_reason(db: Session, record: StopRegistryRecord | None) -> str:
+    if record is None:
+        return ""
+    current = (record.stop_reason or "").strip()
+    if current:
+        return current
+
+    fallback = db.scalar(
+        select(StopRegistryRecord.stop_reason)
+        .where(
+            StopRegistryRecord.pass_number == record.pass_number,
+            StopRegistryRecord.stop_reason != "",
+        )
+        .order_by(StopRegistryRecord.record_date.desc(), StopRegistryRecord.source_row.desc())
+        .limit(1)
+    )
+    return (fallback or "").strip()
 
 
 @router.get("/ostanovka/", response_class=HTMLResponse)
@@ -76,7 +95,8 @@ def ostanovka_check(payload: PassCheckRequest, db: Session = Depends(get_db)):
         .order_by(StopRegistryRecord.record_date.desc(), StopRegistryRecord.source_row.desc())
         .limit(1)
     )
-    result = _apply_access_policy(result, record)
+    reason = _resolve_denial_reason(db, record)
+    result = _apply_access_policy(result, record, reason_override=reason)
 
     response = JSONResponse(result)
     response.headers["Cache-Control"] = "no-store"
