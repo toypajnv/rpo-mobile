@@ -92,17 +92,24 @@
     $('rpo-deny-stage').textContent = status.denied_stage || status.denied_field_key || 'Этап работ';
     $('rpo-deny-reason').textContent = status.denied_reason || 'Оператор запретил проведение работ. Уточните причину у оператора.';
     overlay.hidden = false;
-    document.body.classList.add('rpo-permit-denied');
+    const wasDenied = document.body.classList.contains('rpo-permit-denied');
     const pill = document.querySelector('.no-login');
+    if (pill && !wasDenied) pill.dataset.rpoBeforeDeny = pill.innerHTML;
+    document.body.classList.add('rpo-permit-denied');
     if (pill) pill.innerHTML = '<i></i> ЗАПРЕЩЕНО';
   }
 
   function hideLock() {
     const overlay = ensureOverlay();
     overlay.hidden = true;
+    const wasDenied = document.body.classList.contains('rpo-permit-denied');
     document.body.classList.remove('rpo-permit-denied');
+    if (!wasDenied) return;
     const pill = document.querySelector('.no-login');
-    if (pill) pill.innerHTML = '<i></i> Готово';
+    if (pill) {
+      pill.innerHTML = pill.dataset.rpoBeforeDeny || '<i></i> Готово';
+      delete pill.dataset.rpoBeforeDeny;
+    }
   }
 
   function applyCachedState() {
