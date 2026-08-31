@@ -16,6 +16,7 @@ class PwaStaticTests(unittest.TestCase):
         html = (self.pwa_dir / "index.html").read_text(encoding="utf-8")
         js = (self.pwa_dir / "app.js").read_text(encoding="utf-8")
         ux = (self.pwa_dir / "ux.js").read_text(encoding="utf-8")
+        sync = (self.pwa_dir / "sync-status.js").read_text(encoding="utf-8")
         sw = (self.pwa_dir / "sw.js").read_text(encoding="utf-8")
         manifest = json.loads((self.pwa_dir / "manifest.webmanifest").read_text(encoding="utf-8"))
 
@@ -38,7 +39,10 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('Замена исполнителей работ', js)
         self.assertIn('Следующее действие', ux)
         self.assertIn('history-search', ux)
-        self.assertIn("const CACHE='rpo-pwa-shell-v1.1.1'", sw)
+        self.assertIn('/pwa-assets/sync-status.js?v=20260831-1', html)
+        self.assertIn('/pwa-assets/sync-status.js?v=20260831-1', sw)
+        self.assertIn("const CACHE='rpo-pwa-shell-v1.1.2'", sw)
+        self.assertIn('Ошибка передачи на сервер', sync)
         self.assertEqual(manifest['start_url'], '/app/')
         self.assertEqual(manifest['scope'], '/app/')
         self.assertEqual(manifest['display'], 'standalone')
@@ -59,6 +63,23 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('/pwa-assets/ux.js?v=20260830-2', html)
         self.assertIn('/pwa-assets/ux.js?v=20260830-2', sw)
 
+    def test_transmission_status_requires_server_confirmation_and_explains_failures(self) -> None:
+        html = (self.pwa_dir / "index.html").read_text(encoding="utf-8")
+        sync = (self.pwa_dir / "sync-status.js").read_text(encoding="utf-8")
+
+        self.assertIn("const SAVED_KEY = 'rpo_pwa_saved_v1'", sync)
+        self.assertIn('nativeRemoveItem.call(localStorage, SAVED_KEY)', sync)
+        self.assertIn('key === SAVED_KEY', sync)
+        self.assertIn('Server-confirmed fields remain the only source', sync)
+        self.assertIn('pendingKeys', sync)
+        self.assertIn('Ошибка передачи на сервер', sync)
+        self.assertIn('До подтверждения сервера этап не считается переданным', sync)
+        self.assertIn("button.textContent = 'Исправить'", sync)
+        self.assertIn('event.stopImmediatePropagation()', sync)
+        self.assertIn('restoreFailedPayload', sync)
+        self.assertIn('Зелёный статус «Передано» появляется только после подтверждения приёма сервером.', html)
+        self.assertIn('PWA 1.1.2', html)
+
     def test_pwa_routes_and_icons_are_served(self) -> None:
         with TestClient(app) as client:
             response = client.get('/app', follow_redirects=False)
@@ -69,6 +90,10 @@ class PwaStaticTests(unittest.TestCase):
             self.assertEqual(page.status_code, 200)
             self.assertIn('РПО — работы повышенной опасности', page.text)
             self.assertIn('no-cache', page.headers.get('cache-control', ''))
+
+            sync = client.get('/pwa-assets/sync-status.js')
+            self.assertEqual(sync.status_code, 200)
+            self.assertIn('Ошибка передачи на сервер', sync.text)
 
             manifest = client.get('/app/manifest.webmanifest')
             self.assertEqual(manifest.status_code, 200)
@@ -93,7 +118,7 @@ class PwaStaticTests(unittest.TestCase):
             data = response.json()
             self.assertEqual(data['latest_app_version'], '2.1.0')
             self.assertFalse(data['update_required'])
-            self.assertEqual(data['pwa_version'], '1.1.1')
+            self.assertEqual(data['pwa_version'], '1.1.2')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
             self.assertEqual(data['server_version'], '0.6.0')
 
