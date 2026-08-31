@@ -14,7 +14,6 @@
   `;
   document.head.appendChild(style);
 
-  const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
   let snapshot = [];
   let refreshTimer = null;
 
@@ -152,6 +151,8 @@
       annotateTransmissions(snapshot);
     } catch (_) {
     } finally {
+      // The core dashboard refreshes tables every 5 seconds. Re-annotating on a
+      // short independent timer keeps controls fresh without a self-triggering DOM observer.
       refreshTimer = setTimeout(refreshDecisions, 2200);
     }
   }
@@ -198,15 +199,5 @@
     submitDecision(button);
   }, true);
 
-  const observer = new MutationObserver(() => {
-    if (snapshot.length) {
-      annotateWorks(snapshot);
-      annotateTransmissions(snapshot);
-    }
-  });
-  document.addEventListener('DOMContentLoaded', () => {
-    const host = document.querySelector('main');
-    if (host) observer.observe(host, {subtree:true, childList:true});
-    refreshDecisions();
-  });
+  document.addEventListener('DOMContentLoaded', refreshDecisions);
 })();
