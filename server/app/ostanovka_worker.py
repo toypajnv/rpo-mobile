@@ -97,7 +97,6 @@ def process_message(raw_message: bytes, *, expected_subject: str = "", sender_fi
     sender = decoded(message.get("From"))
     subject = decoded(message.get("Subject"))
 
-    # IMAP SUBJECT search is a substring match, so enforce an exact subject after fetch.
     if expected_subject and not _allowed_subject(subject, expected_subject):
         return False
     if not _allowed_sender(sender, sender_filter):
@@ -256,10 +255,10 @@ def poll_imap_once() -> int:
         if status != "OK":
             raise RuntimeError(f"Cannot select IMAP folder {folder}")
 
-        criteria = ["UNSEEN", "SUBJECT", f'"{subject_filter}"']
-        if not _sender_filter_allows_any(sender_filter):
-            criteria.extend(["FROM", f'"{sender_filter}"'])
-        status, data = client.uid("search", None, *criteria)
+        # Python imaplib encodes SEARCH arguments as ASCII. A Cyrillic subject
+        # therefore cannot be sent safely as an IMAP SEARCH criterion. Fetch only
+        # unread messages and validate the decoded subject/sender locally below.
+        status, data = client.uid("search", None, "UNSEEN")
         if status != "OK":
             raise RuntimeError("IMAP search failed")
 
