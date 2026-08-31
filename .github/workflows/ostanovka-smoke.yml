@@ -1,0 +1,52 @@
+name: Ostanovka Smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ostanovka-smoke:
+    name: Verify public stop-registry routes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Wait for VPS autodeploy and verify public route
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for attempt in $(seq 1 36); do
+            page="$(curl -fsS --max-time 8 https://rpo-mng.ru/ostanovka/ 2>/dev/null || true)"
+            spec="$(curl -fsS --max-time 8 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
+            if [[ "$page" == *'Проверка допуска'* ]] && [[ "$spec" == *'/api/ostanovka/check'* ]]; then
+              echo "Ostanovka page and API route are deployed on attempt $attempt"
+              ok=1
+              break
+            fi
+            echo "Waiting for /ostanovka/ autodeploy: attempt $attempt/36"
+            sleep 10
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "Ostanovka route did not become available" >&2
+            exit 1
+          fi
+
+      - name: Verify fail-safe API state before or after registry import
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS --max-time 10 -o /tmp/ostanovka-check.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d '{"pass_number":"99999999"}' \
+            https://rpo-mng.ru/api/ostanovka/check)"
+          cat /tmp/ostanovka-check.json
+          if [[ "$code" != "200" && "$code" != "503" ]]; then
+            echo "Unexpected stop-registry API status: $code" >&2
+            exit 1
+          fi
+          echo "Stop-registry API contract is reachable with HTTP $code"
