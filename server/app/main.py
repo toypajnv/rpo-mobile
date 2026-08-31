@@ -24,6 +24,12 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.6.0"
+_core.app.version = "0.7.0"
 
 app = _core.app
+
+# The stop-registry module is intentionally isolated from the existing RPO logic.
+# Importing it before application startup also registers its SQLAlchemy tables so
+# the existing lifespan Base.metadata.create_all() creates them automatically.
+from .ostanovka import router as ostanovka_router
+app.include_router(ostanovka_router)
