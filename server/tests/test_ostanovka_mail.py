@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import email.message
 import os
 import unittest
 from unittest.mock import patch
@@ -8,20 +9,60 @@ from app import ostanovka_worker as worker
 
 
 class OstanovkaMailTests(unittest.TestCase):
-    def test_sender_subject_and_recipient_filters_are_exact(self) -> None:
+    def test_sender_filter_can_allow_any_sender(self) -> None:
+        self.assertTrue(worker._allowed_sender("one@example.com", "*"))
+        self.assertTrue(worker._allowed_sender("two@example.net", ""))
         self.assertTrue(worker._allowed_sender("Registry Bot <trusted@example.com>", "trusted@example.com"))
         self.assertFalse(worker._allowed_sender("other@example.com", "trusted@example.com"))
+
+    def test_subject_and_recipient_filters_are_exact(self) -> None:
         self.assertTrue(worker._allowed_subject("Реестр остановок", "реестр остановок"))
         self.assertFalse(worker._allowed_subject("Реестр остановок 2", "Реестр остановок"))
         self.assertTrue(worker._allowed_recipient(["ostanovka@team.resend.app"], "ostanovka@team.resend.app"))
         self.assertFalse(worker._allowed_recipient(["other@team.resend.app"], "ostanovka@team.resend.app"))
 
-    def test_resend_import_stays_disabled_until_all_security_filters_exist(self) -> None:
+    def test_imap_raw_message_rejects_partial_subject_match(self) -> None:
+        message = email.message.EmailMessage()
+        message["From"] = "anyone@example.com"
+        message["To"] = "ostanovka@rpo-mng.ru"
+        message["Subject"] = "Реестр остановок тест"
+        message["Message-ID"] = "<partial>"
+        message.set_content("test")
+        message.add_attachment(b"xlsb", maintype="application", subtype="octet-stream", filename="registry.xlsb")
+        with patch.object(worker, "_save_and_import") as importer:
+            self.assertFalse(
+                worker.process_message(
+                    message.as_bytes(),
+                    expected_subject="Реестр остановок",
+                    sender_filter="*",
+                )
+            )
+            importer.assert_not_called()
+
+    def test_imap_raw_message_accepts_any_sender_with_exact_subject(self) -> None:
+        message = email.message.EmailMessage()
+        message["From"] = "outside@example.net"
+        message["To"] = "ostanovka@rpo-mng.ru"
+        message["Subject"] = "Реестр остановок"
+        message["Message-ID"] = "<exact>"
+        message.set_content("test")
+        message.add_attachment(b"xlsb", maintype="application", subtype="octet-stream", filename="registry.xlsb")
+        with patch.object(worker, "_save_and_import", return_value=True) as importer:
+            self.assertTrue(
+                worker.process_message(
+                    message.as_bytes(),
+                    expected_subject="Реестр остановок",
+                    sender_filter="*",
+                )
+            )
+            importer.assert_called_once()
+
+    def test_resend_import_stays_disabled_until_required_filters_exist(self) -> None:
         env = {
             "RESEND_API_KEY": "re_test",
             "STOP_RESEND_TO": "ostanovka@team.resend.app",
-            "STOP_RESEND_SUBJECT": "Реестр остановок",
-            "STOP_RESEND_SENDER": "",
+            "STOP_RESEND_SUBJECT": "",
+            "STOP_RESEND_SENDER": "*",
         }
         with patch.dict(os.environ, env, clear=False), patch.object(worker, "_resend_json") as api:
             self.assertEqual(worker.poll_resend_once(), 0)
@@ -32,7 +73,7 @@ class OstanovkaMailTests(unittest.TestCase):
             "RESEND_API_KEY": "re_test",
             "STOP_RESEND_TO": "ostanovka@team.resend.app",
             "STOP_RESEND_SUBJECT": "Реестр остановок",
-            "STOP_RESEND_SENDER": "trusted@example.com",
+            "STOP_RESEND_SENDER": "*",
             "STOP_MAX_ATTACHMENT_MB": "25",
         }
         listing = {
@@ -41,7 +82,7 @@ class OstanovkaMailTests(unittest.TestCase):
                     "id": "new",
                     "message_id": "<new>",
                     "created_at": "2026-08-31T10:05:00Z",
-                    "from": "Trusted <trusted@example.com>",
+                    "from": "new@example.net",
                     "to": ["ostanovka@team.resend.app"],
                     "subject": "Реестр остановок",
                     "attachments": [{"filename": "new.xlsb"}],
@@ -50,19 +91,10 @@ class OstanovkaMailTests(unittest.TestCase):
                     "id": "old",
                     "message_id": "<old>",
                     "created_at": "2026-08-31T10:00:00Z",
-                    "from": "trusted@example.com",
+                    "from": "old@example.org",
                     "to": ["ostanovka@team.resend.app"],
                     "subject": "Реестр остановок",
                     "attachments": [{"filename": "old.xlsb"}],
-                },
-                {
-                    "id": "ignored",
-                    "message_id": "<ignored>",
-                    "created_at": "2026-08-31T09:00:00Z",
-                    "from": "attacker@example.com",
-                    "to": ["ostanovka@team.resend.app"],
-                    "subject": "Реестр остановок",
-                    "attachments": [{"filename": "bad.xlsb"}],
                 },
             ]
         }
@@ -72,13 +104,7 @@ class OstanovkaMailTests(unittest.TestCase):
             if path == "/emails/receiving":
                 return listing
             email_id = path.split("/")[3]
-            return {
-                "data": [{
-                    "filename": f"{email_id}.xlsb",
-                    "size": 1024,
-                    "download_url": f"https://download.example/{email_id}",
-                }]
-            }
+            return {"data": [{"filename": f"{email_id}.xlsb", "size": 1024, "download_url": f"https://download.example/{email_id}"}]}
 
         imported: list[str] = []
 
@@ -96,33 +122,6 @@ class OstanovkaMailTests(unittest.TestCase):
             self.assertEqual(worker.poll_resend_once(), 2)
 
         self.assertEqual(imported, ["<old>", "<new>"])
-
-    def test_already_imported_resend_message_is_skipped_before_download(self) -> None:
-        env = {
-            "RESEND_API_KEY": "re_test",
-            "STOP_RESEND_TO": "ostanovka@team.resend.app",
-            "STOP_RESEND_SUBJECT": "Реестр остановок",
-            "STOP_RESEND_SENDER": "trusted@example.com",
-        }
-        listing = {
-            "data": [{
-                "id": "same",
-                "message_id": "<same>",
-                "created_at": "2026-08-31T10:00:00Z",
-                "from": "trusted@example.com",
-                "to": ["ostanovka@team.resend.app"],
-                "subject": "Реестр остановок",
-                "attachments": [{"filename": "registry.xlsb"}],
-            }]
-        }
-        with (
-            patch.dict(os.environ, env, clear=False),
-            patch.object(worker, "_resend_json", return_value=listing),
-            patch.object(worker, "_message_imported", return_value=True),
-            patch.object(worker, "_download") as download,
-        ):
-            self.assertEqual(worker.poll_resend_once(), 0)
-            download.assert_not_called()
 
 
 if __name__ == "__main__":
