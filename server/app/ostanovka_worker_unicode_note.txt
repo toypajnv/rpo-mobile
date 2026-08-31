@@ -1,0 +1,1 @@
+Temporary note: Python imaplib SEARCH arguments are ASCII encoded; Cyrillic subjects must be validated after fetching messages rather than passed directly into UID SEARCH.
