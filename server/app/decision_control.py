@@ -148,3 +148,5 @@ def install_decision_control(core) -> None:
             "permit_blocked": summary.get("status") == "denied",
             "approval": summary,
         }
+
+    core.decide_mobile_event = decide_mobile_event
