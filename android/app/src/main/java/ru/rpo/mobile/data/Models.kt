@@ -49,6 +49,11 @@ data class PermitApprovalSummary(
     val pending_count: Int = 0,
     val approved_count: Int = 0,
     val approved_at: String? = null,
+    val denied_count: Int = 0,
+    val denied_field_key: String = "",
+    val denied_stage: String = "",
+    val denied_reason: String = "",
+    val denied_at: String? = null,
 )
 
 data class PermitSnapshot(
