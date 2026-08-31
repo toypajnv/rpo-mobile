@@ -3,15 +3,22 @@ from __future__ import annotations
 import argparse
 import email
 from email.header import decode_header, make_header
+from email.utils import parseaddr
 import imaplib
+import json
 import logging
 import os
 from pathlib import Path
 import tempfile
 import time
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+from sqlalchemy import select
 
 from .database import Base, SessionLocal, engine
-from .stop_registry import import_registry
+from .stop_registry import StopRegistryImport, import_registry
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("ostanovka-mail")
@@ -32,25 +39,33 @@ def import_file(path: str | Path, *, file_name: str = "", message_id: str = "", 
         return import_registry(db, path, file_name=file_name, message_id=message_id, sender=sender)
 
 
-def process_message(raw_message: bytes) -> bool:
-    message = email.message_from_bytes(raw_message)
-    message_id = decoded(message.get("Message-ID"))
-    sender = decoded(message.get("From"))
-    attachments: list[tuple[str, bytes]] = []
-    for part in message.walk():
-        filename = decoded(part.get_filename())
-        if not filename or not filename.lower().endswith(".xlsb"):
-            continue
-        payload = part.get_payload(decode=True)
-        if payload:
-            attachments.append((filename, payload))
-
-    if not attachments:
+def _message_imported(message_id: str) -> bool:
+    if not message_id:
         return False
-    if len(attachments) != 1:
-        raise ValueError("Ожидалось ровно одно вложение .xlsb в письме")
+    Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        return bool(db.scalar(select(StopRegistryImport.id).where(StopRegistryImport.message_id == message_id).limit(1)))
 
-    filename, payload = attachments[0]
+
+def _allowed_sender(raw_sender: str, expected: str) -> bool:
+    actual = parseaddr(raw_sender or "")[1].strip().lower()
+    return bool(actual and expected and actual == expected.strip().lower())
+
+
+def _allowed_subject(actual: str, expected: str) -> bool:
+    return bool(expected and (actual or "").strip().casefold() == expected.strip().casefold())
+
+
+def _allowed_recipient(recipients: object, expected: str) -> bool:
+    if not expected:
+        return False
+    expected_normalized = expected.strip().lower()
+    if not isinstance(recipients, list):
+        return False
+    return any(str(item).strip().lower() == expected_normalized for item in recipients)
+
+
+def _save_and_import(payload: bytes, *, filename: str, message_id: str, sender: str) -> bool:
     with tempfile.NamedTemporaryFile(prefix="stop-registry-", suffix=".xlsb", delete=False) as temp:
         temp.write(payload)
         temp_path = temp.name
@@ -69,7 +84,151 @@ def process_message(raw_message: bytes) -> bool:
         Path(temp_path).unlink(missing_ok=True)
 
 
-def poll_once() -> int:
+def process_message(raw_message: bytes) -> bool:
+    """Compatibility path for IMAP mailboxes."""
+    message = email.message_from_bytes(raw_message)
+    message_id = decoded(message.get("Message-ID"))
+    sender = decoded(message.get("From"))
+    attachments: list[tuple[str, bytes]] = []
+    for part in message.walk():
+        filename = decoded(part.get_filename())
+        if not filename or not filename.lower().endswith(".xlsb"):
+            continue
+        payload = part.get_payload(decode=True)
+        if payload:
+            attachments.append((filename, payload))
+
+    if not attachments:
+        return False
+    if len(attachments) != 1:
+        raise ValueError("Ожидалось ровно одно вложение .xlsb в письме")
+
+    filename, payload = attachments[0]
+    return _save_and_import(payload, filename=filename, message_id=message_id, sender=sender)
+
+
+def _resend_json(path: str, *, api_key: str, query: dict[str, object] | None = None) -> dict:
+    base = os.getenv("STOP_RESEND_API_BASE", "https://api.resend.com").rstrip("/")
+    url = f"{base}{path}"
+    if query:
+        url += "?" + urlencode({key: value for key, value in query.items() if value is not None})
+    request = Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "RPO-Ostanovka/1.0",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Resend API HTTP {exc.code}: {body[:500]}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Resend API unavailable: {exc.reason}") from exc
+
+
+def _download(url: str, *, max_bytes: int) -> bytes:
+    request = Request(url, headers={"User-Agent": "RPO-Ostanovka/1.0"}, method="GET")
+    try:
+        with urlopen(request, timeout=30) as response:
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > max_bytes:
+                raise ValueError("Вложение превышает допустимый размер")
+            payload = response.read(max_bytes + 1)
+    except HTTPError as exc:
+        raise RuntimeError(f"Attachment download HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Attachment download failed: {exc.reason}") from exc
+    if len(payload) > max_bytes:
+        raise ValueError("Вложение превышает допустимый размер")
+    return payload
+
+
+def poll_resend_once() -> int:
+    """Poll Resend Receiving API using the already configured project API key."""
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+    sender_filter = os.getenv("STOP_RESEND_SENDER", "").strip()
+    subject_filter = os.getenv("STOP_RESEND_SUBJECT", "").strip()
+    recipient_filter = os.getenv("STOP_RESEND_TO", "").strip()
+    if not all((api_key, sender_filter, subject_filter, recipient_filter)):
+        log.warning(
+            "Resend receiving is disabled until RESEND_API_KEY, STOP_RESEND_SENDER, "
+            "STOP_RESEND_SUBJECT and STOP_RESEND_TO are configured"
+        )
+        return 0
+
+    limit = max(1, min(100, int(os.getenv("STOP_RESEND_LIST_LIMIT", "50"))))
+    max_bytes = max(1, int(os.getenv("STOP_MAX_ATTACHMENT_MB", "25"))) * 1024 * 1024
+    listing = _resend_json("/emails/receiving", api_key=api_key, query={"limit": limit})
+    messages = listing.get("data") or []
+    if not isinstance(messages, list):
+        raise RuntimeError("Unexpected Resend receiving response")
+
+    # Resend returns newest first. Process oldest matching messages first so the
+    # final database snapshot always corresponds to the newest received registry.
+    messages = sorted(messages, key=lambda item: str((item or {}).get("created_at", "")))
+    processed_count = 0
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        sender = str(item.get("from") or "")
+        subject = str(item.get("subject") or "")
+        recipients = item.get("to")
+        if not _allowed_sender(sender, sender_filter):
+            continue
+        if not _allowed_subject(subject, subject_filter):
+            continue
+        if not _allowed_recipient(recipients, recipient_filter):
+            continue
+
+        email_id = str(item.get("id") or "").strip()
+        message_id = str(item.get("message_id") or "").strip() or (f"resend:{email_id}" if email_id else "")
+        if not email_id or not message_id or _message_imported(message_id):
+            continue
+
+        attachment_meta = item.get("attachments") or []
+        xlsb_meta = [
+            attachment for attachment in attachment_meta
+            if isinstance(attachment, dict) and str(attachment.get("filename") or "").lower().endswith(".xlsb")
+        ]
+        if not xlsb_meta:
+            continue
+        if len(xlsb_meta) != 1:
+            raise ValueError(f"Письмо {email_id}: ожидалось ровно одно вложение .xlsb")
+
+        attachment_listing = _resend_json(
+            f"/emails/receiving/{email_id}/attachments",
+            api_key=api_key,
+        )
+        attachments = attachment_listing.get("data") or []
+        xlsb = [
+            attachment for attachment in attachments
+            if isinstance(attachment, dict) and str(attachment.get("filename") or "").lower().endswith(".xlsb")
+        ]
+        if len(xlsb) != 1:
+            raise ValueError(f"Письмо {email_id}: API вернул некорректный набор XLSB-вложений")
+
+        attachment = xlsb[0]
+        filename = str(attachment.get("filename") or "registry.xlsb")
+        declared_size = int(attachment.get("size") or 0)
+        if declared_size and declared_size > max_bytes:
+            raise ValueError(f"Письмо {email_id}: XLSB-вложение слишком большое")
+        download_url = str(attachment.get("download_url") or "").strip()
+        if not download_url:
+            raise RuntimeError(f"Письмо {email_id}: Resend не вернул download_url")
+
+        payload = _download(download_url, max_bytes=max_bytes)
+        if _save_and_import(payload, filename=filename, message_id=message_id, sender=sender):
+            processed_count += 1
+
+    return processed_count
+
+
+def poll_imap_once() -> int:
     host = os.getenv("STOP_IMAP_HOST", "").strip()
     username = os.getenv("STOP_IMAP_USERNAME", "").strip()
     password = os.getenv("STOP_IMAP_PASSWORD", "")
@@ -112,20 +271,29 @@ def poll_once() -> int:
         return processed_count
 
 
+def poll_once() -> int:
+    provider = os.getenv("STOP_MAIL_PROVIDER", "resend").strip().lower()
+    if provider == "resend":
+        return poll_resend_once()
+    if provider == "imap":
+        return poll_imap_once()
+    raise RuntimeError("STOP_MAIL_PROVIDER must be 'resend' or 'imap'")
+
+
 def run_forever() -> None:
-    interval = max(60, int(os.getenv("STOP_IMAP_POLL_SECONDS", "60")))
+    interval = max(60, int(os.getenv("STOP_MAIL_POLL_SECONDS", os.getenv("STOP_IMAP_POLL_SECONDS", "60"))))
     while True:
         try:
             count = poll_once()
             if count:
                 log.info("processed %s registry message(s)", count)
         except Exception:
-            log.exception("IMAP polling error")
+            log.exception("registry mailbox polling error")
         time.sleep(interval)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import stop registry from XLSB or poll an IMAP mailbox")
+    parser = argparse.ArgumentParser(description="Import stop registry from XLSB or poll Resend/IMAP mailbox")
     parser.add_argument("--file", help="Import one local XLSB file and exit")
     args = parser.parse_args()
     if args.file:
