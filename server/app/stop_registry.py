@@ -91,8 +91,10 @@ def _text(value: object) -> str:
 
 
 def normalize_pass_number(value: object) -> str:
-    raw = unicodedata.normalize("NFKC", _text(value)).strip().translate(CYR_LOOKALIKES).upper()
+    raw = unicodedata.normalize("NFKC", _text(value)).strip().upper()
+    # Remove the human label before replacing Cyrillic lookalike letters in the pass itself.
     raw = re.sub(r"ПРОПУСК", "", raw, flags=re.IGNORECASE)
+    raw = raw.translate(CYR_LOOKALIKES)
     raw = raw.replace("№", " ").replace('"', " ").replace("'", " ")
     raw = re.sub(r"\s+", "", raw)
     match = PASS_TOKEN_RE.fullmatch(raw)
@@ -100,7 +102,7 @@ def normalize_pass_number(value: object) -> str:
 
 
 def extract_pass_numbers(value: object) -> list[str]:
-    raw = unicodedata.normalize("NFKC", _text(value)).translate(CYR_LOOKALIKES).upper()
+    raw = unicodedata.normalize("NFKC", _text(value)).upper()
     if not raw:
         return []
     direct = normalize_pass_number(raw)
@@ -120,17 +122,43 @@ def excel_date(value: object) -> str:
     return _text(value)
 
 
+def _header(value: object) -> str:
+    return re.sub(r"\s+", " ", _text(value).upper().replace("Ё", "Е")).strip()
+
+
+def _validate_registry_headers(row5: list[object], row8: list[object]) -> None:
+    def value(row: list[object], number: int) -> str:
+        return _header(row[number - 1] if len(row) >= number else None)
+
+    expected = (
+        (value(row8, 19), "ПРОПУСКА ПЕРСОНАЛА", "№ пропуска персонала"),
+        (value(row5, 27), "ОТЧЕТ ОБ УСТРАНЕНИИ", "Отчет об устранении"),
+        (value(row5, 30), "КУРС", "Назначенные курсы"),
+        (value(row5, 31), "КУРС ПРОЙДЕН", "Курс пройден"),
+        (value(row5, 32), "ПКМ", "ПКМ"),
+        (value(row5, 33), "ДОСТУП", "Доступ"),
+    )
+    missing = [label for actual, marker, label in expected if marker not in actual]
+    if missing:
+        raise ValueError("Структура листа СВОД изменилась. Не найдены колонки: " + ", ".join(missing))
+
+
 def parse_registry(path: str | Path) -> tuple[list[ParsedStopRecord], int]:
     records: list[ParsedStopRecord] = []
     source_rows = 0
+    row5: list[object] = []
     with open_workbook(str(path)) as workbook:
         if "СВОД" not in workbook.sheets:
             raise ValueError('В файле отсутствует лист "СВОД"')
         with workbook.get_sheet("СВОД") as sheet:
             for row_index, row in enumerate(sheet.rows(), start=1):
+                values = [cell.v for cell in row]
+                if row_index == 5:
+                    row5 = values
+                if row_index == 8:
+                    _validate_registry_headers(row5, values)
                 if row_index <= 8:
                     continue
-                values = [cell.v for cell in row]
                 if not any(value not in (None, "") for value in values):
                     continue
                 source_rows += 1
