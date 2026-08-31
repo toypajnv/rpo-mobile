@@ -56,6 +56,7 @@ jobs:
           node --check server/app/static/dashboard.js
           node --check server/app/static/dashboard-core.js
           node --check server/app/static/dashboard-ux.js
+          node --check server/app/pwa/sync-status.js
           node --check server/app/pwa/app.js
           node --check server/app/pwa/ux.js
           node --check server/app/pwa/sw.js
