@@ -47,9 +47,15 @@ def _message_imported(message_id: str) -> bool:
         return bool(db.scalar(select(StopRegistryImport.id).where(StopRegistryImport.message_id == message_id).limit(1)))
 
 
+def _sender_filter_allows_any(expected: str | None) -> bool:
+    return (expected or "").strip() in {"", "*"}
+
+
 def _allowed_sender(raw_sender: str, expected: str) -> bool:
+    if _sender_filter_allows_any(expected):
+        return True
     actual = parseaddr(raw_sender or "")[1].strip().lower()
-    return bool(actual and expected and actual == expected.strip().lower())
+    return bool(actual and actual == expected.strip().lower())
 
 
 def _allowed_subject(actual: str, expected: str) -> bool:
@@ -84,11 +90,19 @@ def _save_and_import(payload: bytes, *, filename: str, message_id: str, sender: 
         Path(temp_path).unlink(missing_ok=True)
 
 
-def process_message(raw_message: bytes) -> bool:
-    """Compatibility path for IMAP mailboxes."""
+def process_message(raw_message: bytes, *, expected_subject: str = "", sender_filter: str = "*") -> bool:
+    """Validate one raw IMAP message and import its single XLSB attachment."""
     message = email.message_from_bytes(raw_message)
     message_id = decoded(message.get("Message-ID"))
     sender = decoded(message.get("From"))
+    subject = decoded(message.get("Subject"))
+
+    # IMAP SUBJECT search is a substring match, so enforce an exact subject after fetch.
+    if expected_subject and not _allowed_subject(subject, expected_subject):
+        return False
+    if not _allowed_sender(sender, sender_filter):
+        return False
+
     attachments: list[tuple[str, bytes]] = []
     for part in message.walk():
         filename = decoded(part.get_filename())
@@ -149,15 +163,13 @@ def _download(url: str, *, max_bytes: int) -> bytes:
 
 
 def poll_resend_once() -> int:
-    """Poll Resend Receiving API using the already configured project API key."""
     api_key = os.getenv("RESEND_API_KEY", "").strip()
-    sender_filter = os.getenv("STOP_RESEND_SENDER", "").strip()
+    sender_filter = os.getenv("STOP_RESEND_SENDER", "*").strip() or "*"
     subject_filter = os.getenv("STOP_RESEND_SUBJECT", "").strip()
     recipient_filter = os.getenv("STOP_RESEND_TO", "").strip()
-    if not all((api_key, sender_filter, subject_filter, recipient_filter)):
+    if not all((api_key, subject_filter, recipient_filter)):
         log.warning(
-            "Resend receiving is disabled until RESEND_API_KEY, STOP_RESEND_SENDER, "
-            "STOP_RESEND_SUBJECT and STOP_RESEND_TO are configured"
+            "Resend receiving is disabled until RESEND_API_KEY, STOP_RESEND_SUBJECT and STOP_RESEND_TO are configured"
         )
         return 0
 
@@ -168,8 +180,6 @@ def poll_resend_once() -> int:
     if not isinstance(messages, list):
         raise RuntimeError("Unexpected Resend receiving response")
 
-    # Resend returns newest first. Process oldest matching messages first so the
-    # final database snapshot always corresponds to the newest received registry.
     messages = sorted(messages, key=lambda item: str((item or {}).get("created_at", "")))
     processed_count = 0
     for item in messages:
@@ -200,10 +210,7 @@ def poll_resend_once() -> int:
         if len(xlsb_meta) != 1:
             raise ValueError(f"Письмо {email_id}: ожидалось ровно одно вложение .xlsb")
 
-        attachment_listing = _resend_json(
-            f"/emails/receiving/{email_id}/attachments",
-            api_key=api_key,
-        )
+        attachment_listing = _resend_json(f"/emails/receiving/{email_id}/attachments", api_key=api_key)
         attachments = attachment_listing.get("data") or []
         xlsb = [
             attachment for attachment in attachments
@@ -232,12 +239,11 @@ def poll_imap_once() -> int:
     host = os.getenv("STOP_IMAP_HOST", "").strip()
     username = os.getenv("STOP_IMAP_USERNAME", "").strip()
     password = os.getenv("STOP_IMAP_PASSWORD", "")
-    sender_filter = os.getenv("STOP_IMAP_SENDER", "").strip()
+    sender_filter = os.getenv("STOP_IMAP_SENDER", "*").strip() or "*"
     subject_filter = os.getenv("STOP_IMAP_SUBJECT", "").strip()
-    if not all((host, username, password, sender_filter, subject_filter)):
+    if not all((host, username, password, subject_filter)):
         log.warning(
-            "IMAP import is disabled until STOP_IMAP_HOST, STOP_IMAP_USERNAME, STOP_IMAP_PASSWORD, "
-            "STOP_IMAP_SENDER and STOP_IMAP_SUBJECT are configured"
+            "IMAP import is disabled until STOP_IMAP_HOST, STOP_IMAP_USERNAME, STOP_IMAP_PASSWORD and STOP_IMAP_SUBJECT are configured"
         )
         return 0
 
@@ -249,10 +255,14 @@ def poll_imap_once() -> int:
         status, _ = client.select(folder)
         if status != "OK":
             raise RuntimeError(f"Cannot select IMAP folder {folder}")
-        criteria = ["UNSEEN", "FROM", f'"{sender_filter}"', "SUBJECT", f'"{subject_filter}"']
+
+        criteria = ["UNSEEN", "SUBJECT", f'"{subject_filter}"']
+        if not _sender_filter_allows_any(sender_filter):
+            criteria.extend(["FROM", f'"{sender_filter}"'])
         status, data = client.uid("search", None, *criteria)
         if status != "OK":
             raise RuntimeError("IMAP search failed")
+
         uids = [uid for uid in (data[0] or b"").split() if uid]
         processed_count = 0
         for uid in uids:
@@ -263,7 +273,7 @@ def poll_imap_once() -> int:
             if not raw_message:
                 continue
             try:
-                if process_message(raw_message):
+                if process_message(raw_message, expected_subject=subject_filter, sender_filter=sender_filter):
                     client.uid("store", uid, "+FLAGS", "(\\Seen)")
                     processed_count += 1
             except Exception:
