@@ -1,5 +1,6 @@
 package ru.rpo.mobile.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,35 +19,80 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.gson.Gson
+import ru.rpo.mobile.data.PermitApprovalSummary
 
 private val DenyRed = Color(0xFFB51616)
 private val DenyDarkRed = Color(0xFF861010)
 private val DenyLight = Color(0xFFFFECEA)
+private const val DENIAL_PREFS = "rpo_denial_cache"
+
+private fun denialKey(permit: String) = "denied_${permit.trim().uppercase()}"
+
+private fun loadCachedDenial(context: Context, permit: String): PermitApprovalSummary? {
+    if (permit.isBlank()) return null
+    val raw = context.getSharedPreferences(DENIAL_PREFS, Context.MODE_PRIVATE)
+        .getString(denialKey(permit), null) ?: return null
+    return runCatching { Gson().fromJson(raw, PermitApprovalSummary::class.java) }
+        .getOrNull()
+        ?.takeIf { it.status == "denied" }
+}
+
+private fun saveCachedDenial(context: Context, permit: String, denial: PermitApprovalSummary?) {
+    if (permit.isBlank()) return
+    val edit = context.getSharedPreferences(DENIAL_PREFS, Context.MODE_PRIVATE).edit()
+    if (denial?.status == "denied") edit.putString(denialKey(permit), Gson().toJson(denial))
+    else edit.remove(denialKey(permit))
+    edit.apply()
+}
 
 @Composable
 fun RpoDecisionAwareApp(vm: RpoViewModel = viewModel()) {
     val state by vm.state.collectAsState()
-    val denial = state.approvalSummary?.takeIf { it.status == "denied" }
-    if (denial != null && state.permitNumber.trim().isNotEmpty()) {
-        DeniedPermitScreen(state, vm)
+    val context = LocalContext.current
+    val permit = state.permitNumber.trim().uppercase()
+    var cachedDenial by remember(permit) { mutableStateOf(loadCachedDenial(context, permit)) }
+    val liveApproval = state.approvalSummary
+
+    LaunchedEffect(permit, liveApproval) {
+        if (permit.isBlank()) {
+            cachedDenial = null
+        } else if (liveApproval?.status == "denied") {
+            saveCachedDenial(context, permit, liveApproval)
+            cachedDenial = liveApproval
+        } else if (liveApproval != null) {
+            // A successful server snapshot without a denial is authoritative and
+            // clears the fail-safe cache left from an earlier operator prohibition.
+            saveCachedDenial(context, permit, null)
+            cachedDenial = null
+        }
+    }
+
+    val denial = liveApproval?.takeIf { it.status == "denied" } ?: cachedDenial
+    if (denial != null && permit.isNotEmpty()) {
+        DeniedPermitScreen(state, denial, vm)
     } else {
         RpoUxApp(vm)
     }
 }
 
 @Composable
-private fun DeniedPermitScreen(state: FormState, vm: RpoViewModel) {
-    val denial = state.approvalSummary ?: return
+private fun DeniedPermitScreen(state: FormState, denial: PermitApprovalSummary, vm: RpoViewModel) {
     MaterialTheme {
         Surface(color = DenyRed, modifier = Modifier.fillMaxSize()) {
             Column(
