@@ -249,53 +249,30 @@ def _access(value: str) -> str:
     return "unknown"
 
 
-def lookup_pass(db: Session, pass_input: str) -> dict:
-    pass_number = normalize_pass_number(pass_input)
-    if not pass_number:
-        raise ValueError("Введите корректный номер пропуска")
+def _requirements(record: StopRegistryRecord) -> list[dict]:
+    report_state = _yes_no_required(record.report_status)
+    course_state = _yes_no_required(record.course_status)
+    pkm_state = _yes_no_required(record.pkm_status)
+    course_name = (record.course_name or "").strip()
+    if "НЕ ТРЕБУЕТ" in _upper(course_name):
+        course_name = ""
 
-    records = list(
-        db.scalars(
-            select(StopRegistryRecord)
-            .where(StopRegistryRecord.pass_number == pass_number)
-            .order_by(StopRegistryRecord.record_date.desc(), StopRegistryRecord.source_row.desc())
-        )
-    )
-    denied = [record for record in records if _access(record.access_status) == "denied"]
-    if not denied:
-        return {
-            "pass_number": pass_number,
-            "status": "allowed",
-            "title": "Доступ разрешен",
-            "message": "По реестру остановок действующих ограничений не найдено.",
-            "requirements": [],
-        }
+    report_ok = report_state in {"yes", "not_required"}
+    course_ok = course_state in {"yes", "not_required"}
+    pkm_ok = pkm_state in {"yes", "not_required"}
 
-    report_states = [_yes_no_required(record.report_status) for record in denied]
-    course_states = [_yes_no_required(record.course_status) for record in denied]
-    pkm_states = [_yes_no_required(record.pkm_status) for record in denied]
-    course_names = []
-    for record in denied:
-        name = (record.course_name or "").strip()
-        if name and "НЕ ТРЕБУЕТ" not in _upper(name) and name not in course_names:
-            course_names.append(name)
-
-    report_ok = all(state in {"yes", "not_required"} for state in report_states)
-    course_ok = all(state in {"yes", "not_required"} for state in course_states)
-    pkm_ok = all(state in {"yes", "not_required"} for state in pkm_states)
-
-    requirements = [
+    return [
         {
             "key": "report",
             "label": "Отчет об устранении",
             "state": "ok" if report_ok else "required",
-            "value": "Предоставлен" if report_ok else "Необходимо предоставить",
+            "value": "Предоставлен / не требуется" if report_ok else "Необходимо предоставить",
         },
         {
             "key": "course",
             "label": "Курс обучения",
             "state": "ok" if course_ok else "required",
-            "value": "Пройден" if course_ok else "Не пройден" + (f": {', '.join(course_names)}" if course_names else ""),
+            "value": "Пройден / не требуется" if course_ok else "Не пройден" + (f": {course_name}" if course_name else ""),
         },
         {
             "key": "pkm",
@@ -305,10 +282,52 @@ def lookup_pass(db: Session, pass_input: str) -> dict:
         },
     ]
 
+
+def lookup_pass(db: Session, pass_input: str) -> dict:
+    pass_number = normalize_pass_number(pass_input)
+    if not pass_number:
+        raise ValueError("Введите корректный номер пропуска")
+
+    # The registry contains history. Only the latest row defines the current state:
+    # newest date first, and for equal dates the lower sheet row is superseded by the later row.
+    record = db.scalar(
+        select(StopRegistryRecord)
+        .where(StopRegistryRecord.pass_number == pass_number)
+        .order_by(StopRegistryRecord.record_date.desc(), StopRegistryRecord.source_row.desc())
+        .limit(1)
+    )
+    if record is None:
+        return {
+            "pass_number": pass_number,
+            "status": "allowed",
+            "title": "Доступ разрешен",
+            "message": "Номер пропуска отсутствует в действующем реестре ограничений.",
+            "requirements": [],
+        }
+
+    access = _access(record.access_status)
+    if access == "allowed":
+        return {
+            "pass_number": pass_number,
+            "status": "allowed",
+            "title": "Доступ разрешен",
+            "message": "По последней записи реестра доступ разрешен.",
+            "requirements": [],
+        }
+
+    if access == "unknown":
+        return {
+            "pass_number": pass_number,
+            "status": "denied",
+            "title": "Доступ запрещен",
+            "message": "Статус допуска не определен в последней записи реестра. Обратитесь к ответственному лицу.",
+            "requirements": _requirements(record),
+        }
+
     return {
         "pass_number": pass_number,
         "status": "denied",
         "title": "Доступ запрещен",
         "message": "Для снятия ограничения проверьте требования ниже.",
-        "requirements": requirements,
+        "requirements": _requirements(record),
     }
