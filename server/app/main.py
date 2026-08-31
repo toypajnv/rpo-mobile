@@ -29,6 +29,7 @@ _core.app.version = "0.7.0"
 # until an operator explicitly allows that stage again.
 from .decision_control import install_decision_control
 install_decision_control(_core)
+decide_mobile_event = _core.decide_mobile_event
 
 app = _core.app
 
