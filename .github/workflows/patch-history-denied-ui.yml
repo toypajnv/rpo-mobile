@@ -1,0 +1,53 @@
+name: Patch denied history UI
+
+on:
+  push:
+    branches: [fix/history-denied-status-20260901]
+    paths:
+      - '.github/workflows/patch-history-denied-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/history-denied-status-20260901
+      - name: Patch Android history UI
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/java/ru/rpo/mobile/ui/RpoUxApp.kt')
+          s = p.read_text(encoding='utf-8')
+          replacements = [
+              ('private enum class HistoryFilter { ALL, PENDING, APPROVED }',
+               'private enum class HistoryFilter { ALL, PENDING, APPROVED, DENIED }'),
+              ('                HistoryFilter.APPROVED -> item.approval_status == "approved"\n',
+               '                HistoryFilter.APPROVED -> item.approval_status == "approved"\n                HistoryFilter.DENIED -> item.approval_status == "denied"\n'),
+              ('            FilterChip(filter == HistoryFilter.APPROVED, { filter = HistoryFilter.APPROVED }, { Text("Разрешено") })\n',
+               '            FilterChip(filter == HistoryFilter.APPROVED, { filter = HistoryFilter.APPROVED }, { Text("Разрешено") })\n            FilterChip(filter == HistoryFilter.DENIED, { filter = HistoryFilter.DENIED }, { Text("Запрещено") })\n'),
+              ('                color = Color.White,\n                shape = RoundedCornerShape(16.dp),\n                shadowElevation = 1.dp,\n                modifier = Modifier.fillMaxWidth().clickable { expanded = if (open) null else item.permit_number },\n',
+               '                color = if (item.approval_status == "denied") Color(0xFFFFF2F0) else Color.White,\n                shape = RoundedCornerShape(16.dp),\n                shadowElevation = 1.dp,\n                modifier = Modifier.fillMaxWidth().clickable { expanded = if (open) null else item.permit_number },\n'),
+              ('                    val statusColor = if (item.approval_status == "approved") UxGreen else if (item.approval_status == "pending") UxOrange else UxBlue\n                    Text(\n                        if (item.approval_status == "approved") "Разрешено" else if (item.approval_status == "pending") "Ожидает разрешения" else "Разрешение не требуется",\n',
+               '                    val statusColor = when (item.approval_status) {\n                        "denied", "stopped" -> UxRed\n                        "approved" -> UxGreen\n                        "pending" -> UxOrange\n                        else -> UxBlue\n                    }\n                    val statusText = when (item.approval_status) {\n                        "denied" -> "Проведение запрещено"\n                        "stopped" -> "Работы остановлены"\n                        "approved" -> "Разрешено"\n                        "pending" -> "Ожидает разрешения"\n                        else -> "Разрешение не требуется"\n                    }\n                    Text(\n                        statusText,\n')
+          ]
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit(f'Android history patch marker not found: {old[:90]!r}')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/patch-history-denied-ui.yml').unlink()
+          PY
+      - name: Commit patched UI and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add android/app/src/main/java/ru/rpo/mobile/ui/RpoUxApp.kt .github/workflows/patch-history-denied-ui.yml
+          git commit -m "Show operator denial in Android history"
+          git push origin HEAD:fix/history-denied-status-20260901
