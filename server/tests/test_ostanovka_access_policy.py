@@ -19,7 +19,7 @@ class FakeDb:
 class OstanovkaAccessPolicyTests(unittest.TestCase):
     def base_result(self) -> dict:
         return {
-            "pass_number": "51398",
+            "pass_number": "51398C",
             "status": "denied",
             "title": "Доступ запрещен",
             "message": "old",
@@ -34,24 +34,27 @@ class OstanovkaAccessPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "allowed")
         self.assertEqual(result["title"], "Доступ разрешен")
         self.assertEqual(result["requirements"], [])
+        self.assertEqual(result["blocks"], [])
 
     def test_explicit_allowed_allows_entry(self) -> None:
         result = _apply_access_policy(self.base_result(), self.record("Разрешен"))
         self.assertEqual(result["status"], "allowed")
 
-    def test_explicit_denied_blocks_and_returns_reason(self) -> None:
+    def test_explicit_denied_blocks_and_keeps_reason_for_spoiler(self) -> None:
         reason = "Нарушение требований безопасного производства работ"
         result = _apply_access_policy(self.base_result(), self.record("Запрещен", reason))
         self.assertEqual(result["status"], "denied")
         self.assertEqual(result["reason"], reason)
-        self.assertEqual(result["message"], f"Причина: {reason}")
+        self.assertEqual(result["message"], "Блокировка по реестру остановок.")
         self.assertTrue(result["requirements"])
+        self.assertEqual(result["blocks"][0]["type"], "registry")
+        self.assertEqual(result["blocks"][0]["description"], reason)
 
-    def test_denied_without_reason_has_clear_message(self) -> None:
+    def test_denied_without_reason_still_has_registry_block(self) -> None:
         result = _apply_access_policy(self.base_result(), self.record("ЗАПРЕЩЕН", ""))
         self.assertEqual(result["status"], "denied")
         self.assertEqual(result["reason"], "")
-        self.assertEqual(result["message"], "Причина запрета в реестре не указана.")
+        self.assertEqual(result["blocks"][0]["description"], "")
 
     def test_reason_falls_back_to_latest_non_empty_history_value(self) -> None:
         db = FakeDb("Нарушение требований безопасного производства работ")
@@ -62,7 +65,7 @@ class OstanovkaAccessPolicyTests(unittest.TestCase):
 
         result = _apply_access_policy(self.base_result(), record, reason_override=reason)
         self.assertEqual(result["reason"], reason)
-        self.assertEqual(result["message"], f"Причина: {reason}")
+        self.assertEqual(result["blocks"][0]["description"], reason)
 
     def test_current_reason_wins_without_history_query(self) -> None:
         db = FakeDb("Старая причина")
