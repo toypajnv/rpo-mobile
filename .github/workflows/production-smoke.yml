@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and operator decision release
+      - name: Wait for VPS autodeploy and mobile history denial release
         shell: bash
         run: |
           set -euo pipefail
@@ -26,26 +26,27 @@ jobs:
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
             dashboard_loader="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard.js 2>/dev/null || true)"
             if [[ "$health" == *'"status":"ok"'* ]] \
-              && [[ "$config" == *'"server_version":"0.7.0"'* ]] \
-              && [[ "$config" == *'"latest_app_version":"2.2.0"'* ]] \
-              && [[ "$config" == *'"pwa_version":"1.2.0"'* ]] \
-              && [[ "$pwa" == *'PWA 1.2.0'* ]] \
+              && [[ "$config" == *'"server_version":"0.7.1"'* ]] \
+              && [[ "$config" == *'"latest_app_version":"2.2.1"'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.2.1"'* ]] \
+              && [[ "$pwa" == *'PWA 1.2.1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/deny-lock.js?v=20260831-1'* ]] \
+              && [[ "$pwa" == *'/pwa-assets/history-status.js?v=20260901-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/sync-status.js?v=20260831-1'* ]] \
               && [[ "$dashboard_loader" == *'dashboard-decisions.js?v=20260831-1'* ]]; then
-              echo "Production Android 2.2.0 / PWA 1.2.0 / operator allow-deny controls deployed on attempt $attempt"
+              echo "Production Android 2.2.1 / PWA 1.2.1 / mobile history denial release deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for operator decision release autodeploy: attempt $attempt/36"
+            echo "Waiting for mobile history denial release autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Operator decision release did not become ready in time" >&2
+            echo "Mobile history denial release did not become ready in time" >&2
             exit 1
           fi
 
-      - name: Verify installable PWA decision and transmission contract
+      - name: Verify installable PWA decision, history and transmission contract
         shell: bash
         run: |
           set -euo pipefail
@@ -54,9 +55,10 @@ jobs:
           grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
           grep -F 'На экран Домой' /tmp/rpo-pwa.html
           grep -F 'permit-suggestion-menu' /tmp/rpo-pwa.html
-          grep -F 'PWA 1.2.0' /tmp/rpo-pwa.html
+          grep -F 'PWA 1.2.1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/rpo-pwa.html
+          grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/rpo-pwa.html
           grep -F 'Если оператор запретит проведение работ по любому этапу' /tmp/rpo-pwa.html
 
           curl -fsS --max-time 10 https://rpo-mng.ru/app/manifest.webmanifest -o /tmp/rpo-manifest.json
@@ -73,9 +75,10 @@ jobs:
 
           curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
-          grep -F "rpo-pwa-shell-v1.2.0" /tmp/sw.js
+          grep -F "rpo-pwa-shell-v1.2.1" /tmp/sw.js
           grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/sw.js
           grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/sw.js
+          grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/sw.js
 
           curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/sync-status.js -o /tmp/pwa-sync-status.js
           grep -F "const SAVED_KEY = 'rpo_pwa_saved_v1'" /tmp/pwa-sync-status.js
@@ -91,9 +94,15 @@ jobs:
           grep -F 'Выбрать другой НД' /tmp/pwa-deny-lock.js
           grep -F 'При отсутствии сети ранее полученный запрет сохраняется' /tmp/pwa-deny-lock.js
 
+          curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/history-status.js -o /tmp/pwa-history-status.js
+          grep -F 'Проведение запрещено' /tmp/pwa-history-status.js
+          grep -F 'history-denied' /tmp/pwa-history-status.js
+          grep -F '/api/mobile/permit?permit_number=' /tmp/pwa-history-status.js
+
           curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/ux.js -o /tmp/pwa-ux.js
           grep -F 'Следующее действие' /tmp/pwa-ux.js
           grep -F 'history-search' /tmp/pwa-ux.js
+          grep -F 'data-history-filter="denied"' /tmp/pwa-ux.js
           grep -F "window.addEventListener('pageshow'" /tmp/pwa-ux.js
           grep -F "event.target.dispatchEvent(new Event('input'" /tmp/pwa-ux.js
           if grep -Fq 'observe(stageFields' /tmp/pwa-ux.js; then
@@ -133,6 +142,7 @@ jobs:
           spec = json.loads(Path('/tmp/rpo-openapi.json').read_text())
           paths = spec.get('paths', {})
           required = [
+              '/api/mobile/events',
               '/api/mobile/permit',
               '/api/mobile/permit-suggestions',
               '/api/mobile/config',
@@ -158,12 +168,12 @@ jobs:
           from pathlib import Path
           cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
           assert cfg['status']=='ok'
-          assert cfg['latest_app_version']=='2.2.0'
+          assert cfg['latest_app_version']=='2.2.1'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          assert cfg['pwa_version']=='1.2.0'
+          assert cfg['pwa_version']=='1.2.1'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
-          assert cfg['server_version']=='0.7.0'
+          assert cfg['server_version']=='0.7.1'
           assert cfg['minimum_supported_version']=='1.0.1'
-          print('Older APKs remain supported; decision release contract confirmed')
+          print('Older APKs remain supported; history denial release contract confirmed')
           PY

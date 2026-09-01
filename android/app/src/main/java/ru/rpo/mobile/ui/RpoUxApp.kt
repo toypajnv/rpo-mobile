@@ -94,7 +94,7 @@ private val UxDateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 private val UxTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 private enum class UxTab { WORK, HISTORY, HELP }
-private enum class HistoryFilter { ALL, PENDING, APPROVED }
+private enum class HistoryFilter { ALL, PENDING, APPROVED, DENIED }
 
 private fun uxFingerprint(s: FormState): String = listOf(
     s.stage.id,
@@ -898,6 +898,7 @@ private fun UxHistoryScreen(items: List<EventResponse>, modifier: Modifier = Mod
                 HistoryFilter.ALL -> true
                 HistoryFilter.PENDING -> item.approval_status == "pending"
                 HistoryFilter.APPROVED -> item.approval_status == "approved"
+                HistoryFilter.DENIED -> item.approval_status == "denied"
             }
             matchesQuery && matchesFilter
         }
@@ -919,6 +920,7 @@ private fun UxHistoryScreen(items: List<EventResponse>, modifier: Modifier = Mod
             FilterChip(filter == HistoryFilter.ALL, { filter = HistoryFilter.ALL }, { Text("Все") })
             FilterChip(filter == HistoryFilter.PENDING, { filter = HistoryFilter.PENDING }, { Text("Ожидают") })
             FilterChip(filter == HistoryFilter.APPROVED, { filter = HistoryFilter.APPROVED }, { Text("Разрешено") })
+            FilterChip(filter == HistoryFilter.DENIED, { filter = HistoryFilter.DENIED }, { Text("Запрещено") })
         }
         if (filtered.isEmpty()) {
             Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
@@ -928,7 +930,7 @@ private fun UxHistoryScreen(items: List<EventResponse>, modifier: Modifier = Mod
         filtered.forEach { item ->
             val open = expanded == item.permit_number
             Surface(
-                color = Color.White,
+                color = if (item.approval_status == "denied") Color(0xFFFFF2F0) else Color.White,
                 shape = RoundedCornerShape(16.dp),
                 shadowElevation = 1.dp,
                 modifier = Modifier.fillMaxWidth().clickable { expanded = if (open) null else item.permit_number },
@@ -941,9 +943,21 @@ private fun UxHistoryScreen(items: List<EventResponse>, modifier: Modifier = Mod
                         }
                         Icon(if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null, tint = UxBlue)
                     }
-                    val statusColor = if (item.approval_status == "approved") UxGreen else if (item.approval_status == "pending") UxOrange else UxBlue
+                    val statusColor = when (item.approval_status) {
+                        "denied", "stopped" -> UxRed
+                        "approved" -> UxGreen
+                        "pending" -> UxOrange
+                        else -> UxBlue
+                    }
+                    val statusText = when (item.approval_status) {
+                        "denied" -> "Проведение запрещено"
+                        "stopped" -> "Работы остановлены"
+                        "approved" -> "Разрешено"
+                        "pending" -> "Ожидает разрешения"
+                        else -> "Разрешение не требуется"
+                    }
                     Text(
-                        if (item.approval_status == "approved") "Разрешено" else if (item.approval_status == "pending") "Ожидает разрешения" else "Разрешение не требуется",
+                        statusText,
                         color = statusColor,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 10.sp,

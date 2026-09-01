@@ -44,7 +44,9 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('/pwa-assets/sync-status.js?v=20260831-1', sw)
         self.assertIn('/pwa-assets/deny-lock.js?v=20260831-1', html)
         self.assertIn('/pwa-assets/deny-lock.js?v=20260831-1', sw)
-        self.assertIn("const CACHE='rpo-pwa-shell-v1.2.0'", sw)
+        self.assertIn('/pwa-assets/history-status.js?v=20260901-1', html)
+        self.assertIn('/pwa-assets/history-status.js?v=20260901-1', sw)
+        self.assertIn("const CACHE='rpo-pwa-shell-v1.2.1'", sw)
         self.assertIn('Ошибка передачи на сервер', sync)
         self.assertIn('ПРОВЕДЕНИЕ РАБОТ ЗАПРЕЩЕНО', deny)
         self.assertIn('rpo_pwa_denied_permit_v1', deny)
@@ -83,7 +85,7 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('event.stopImmediatePropagation()', sync)
         self.assertIn('restoreFailedPayload', sync)
         self.assertIn('Если оператор запретит проведение работ по любому этапу', html)
-        self.assertIn('PWA 1.2.0', html)
+        self.assertIn('PWA 1.2.1', html)
 
     def test_operator_denial_is_a_full_screen_fail_safe_lock(self) -> None:
         html = (self.pwa_dir / "index.html").read_text(encoding="utf-8")
@@ -118,6 +120,10 @@ class PwaStaticTests(unittest.TestCase):
             self.assertEqual(deny.status_code, 200)
             self.assertIn('ПРОВЕДЕНИЕ РАБОТ ЗАПРЕЩЕНО', deny.text)
 
+            history_status = client.get('/pwa-assets/history-status.js')
+            self.assertEqual(history_status.status_code, 200)
+            self.assertIn('Проведение запрещено', history_status.text)
+
             manifest = client.get('/app/manifest.webmanifest')
             self.assertEqual(manifest.status_code, 200)
             self.assertEqual(manifest.json()['start_url'], '/app/')
@@ -139,11 +145,11 @@ class PwaStaticTests(unittest.TestCase):
             response = client.get('/api/mobile/config?app_version=1.0.1')
             self.assertEqual(response.status_code, 200)
             data = response.json()
-            self.assertEqual(data['latest_app_version'], '2.2.0')
+            self.assertEqual(data['latest_app_version'], '2.2.1')
             self.assertFalse(data['update_required'])
-            self.assertEqual(data['pwa_version'], '1.2.0')
+            self.assertEqual(data['pwa_version'], '1.2.1')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
-            self.assertEqual(data['server_version'], '0.7.0')
+            self.assertEqual(data['server_version'], '0.7.1')
 
 
 if __name__ == '__main__':
