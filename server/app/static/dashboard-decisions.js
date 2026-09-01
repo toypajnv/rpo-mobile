@@ -16,6 +16,7 @@
 
   let snapshot = [];
   let refreshTimer = null;
+  let tableObserversBound = false;
 
   function filterQuery() {
     const q = new URLSearchParams({limit: '200'});
@@ -141,18 +142,31 @@
     });
   }
 
+  function annotateSnapshot() {
+    if (!snapshot.length) return;
+    annotateWorks(snapshot);
+    annotateTransmissions(snapshot);
+  }
+
+  function bindTableObservers() {
+    if (tableObserversBound) return;
+    tableObserversBound = true;
+    ['#works-body', '#transmissions-body'].forEach(selector => {
+      const body = document.querySelector(selector);
+      if (!body) return;
+      new MutationObserver(() => queueMicrotask(annotateSnapshot)).observe(body, {childList:true});
+    });
+  }
+
   async function refreshDecisions() {
     clearTimeout(refreshTimer);
     try {
       const response = await fetch('/api/operator/events?' + filterQuery().toString(), {credentials:'same-origin', cache:'no-store'});
       if (!response.ok) return;
       snapshot = await response.json();
-      annotateWorks(snapshot);
-      annotateTransmissions(snapshot);
+      annotateSnapshot();
     } catch (_) {
     } finally {
-      // The core dashboard refreshes tables every 5 seconds. Re-annotating on a
-      // short independent timer keeps controls fresh without a self-triggering DOM observer.
       refreshTimer = setTimeout(refreshDecisions, 2200);
     }
   }
@@ -199,5 +213,8 @@
     submitDecision(button);
   }, true);
 
-  document.addEventListener('DOMContentLoaded', refreshDecisions);
+  document.addEventListener('DOMContentLoaded', () => {
+    bindTableObservers();
+    refreshDecisions();
+  });
 })();
