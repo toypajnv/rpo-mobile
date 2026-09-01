@@ -16,29 +16,24 @@ for _name in dir(_core):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_core, _name)
 
-LATEST_MOBILE_VERSION = "2.2.0"
+LATEST_MOBILE_VERSION = "2.2.1"
 MIN_SUPPORTED_MOBILE_VERSION = _core.MIN_SUPPORTED_MOBILE_VERSION
-MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.2.0-test/rpo-mobile-2.2.0.apk"
-PWA_VERSION = "1.2.0"
+MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.2.1-test/rpo-mobile-2.2.1.apk"
+PWA_VERSION = "1.2.1"
 PWA_URL = _core.PWA_URL
 DASHBOARD_ASSET_VERSION = "20260901-2"
 PWA_ENTRY_HOTFIX_VERSION = "20260901-1"
+PWA_HISTORY_STATUS_VERSION = "20260901-1"
 
 _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.7.0"
+_core.app.version = "0.7.1"
 
 
 def _install_dashboard_assets() -> None:
-    """Serve a fresh dashboard loader and load decision controls directly.
-
-    The decision script used to be loaded only through the asynchronous dashboard
-    loader. A stale/failed loader therefore left operators with only the legacy
-    ``Разрешить`` button. The direct script tag makes allow/deny controls part of
-    the rendered operator page contract instead of an optional loader side effect.
-    """
+    """Serve a fresh dashboard loader and load decision controls directly."""
     template_name = "dashboard.html"
     source_path = _core.BASE_DIR / "templates" / template_name
     source = source_path.read_text(encoding="utf-8")
@@ -70,20 +65,30 @@ _install_dashboard_assets()
 from .decision_control import install_decision_control
 install_decision_control(_core)
 decide_mobile_event = _core.decide_mobile_event
+mobile_history = _core.mobile_history
 
 app = _core.app
 
 
 @app.middleware("http")
-async def inject_pwa_permit_entry_hotfix(request, call_next):
-    """Keep the permit form open while the worker is still typing the ND number."""
+async def inject_pwa_release_hotfixes(request, call_next):
+    """Inject small no-cache PWA compatibility fixes without rewriting the base shell."""
     if request.method == "GET" and request.url.path == "/app/":
         source = (_core.PWA_DIR / "index.html").read_text(encoding="utf-8")
-        tag = (
+        permit_tag = (
             f'<script src="/pwa-assets/permit-entry-hotfix.js?v={PWA_ENTRY_HOTFIX_VERSION}" defer></script>'
         )
-        if tag not in source:
-            source = source.replace("</body>", f"  {tag}\n</body>")
+        history_tag = (
+            f'<script src="/pwa-assets/history-status.js?v={PWA_HISTORY_STATUS_VERSION}" defer></script>'
+        )
+        if permit_tag not in source:
+            source = source.replace("</body>", f"  {permit_tag}\n</body>")
+        if history_tag not in source:
+            source = source.replace("</body>", f"  {history_tag}\n</body>")
+        source = source.replace(
+            "PWA 1.2.0 · разрешение и запрет оператором · единая система с Android РПО 2.2.0.",
+            "PWA 1.2.1 · статусы запрета в истории · единая система с Android РПО 2.2.1.",
+        )
         return HTMLResponse(
             source,
             headers={
