@@ -77,6 +77,50 @@ def install_decision_control(core) -> None:
     core._decision_control_original_summary = core._approval_summary_from_data
     core._approval_summary_from_data = lambda data: _decision_summary(core, data)
 
+    # The historical mobile history endpoint aggregates one card per permit, but
+    # its legacy summary knew only pending/approved. A denied stage therefore fell
+    # through to "approved". Replace only the route callable and keep the existing
+    # response model/URL so old iOS PWA and Android APKs remain API-compatible.
+    original_mobile_history = core.mobile_history
+
+    def mobile_history_with_decisions(device_id: str, limit: int = 30, db: Session | None = None):
+        if db is None:
+            raise RuntimeError("Database session is required")
+        rows = original_mobile_history(device_id=device_id, limit=limit, db=db)
+        permit_numbers = {str(row.get("permit_number", "")).strip().upper() for row in rows if row.get("permit_number")}
+        records = []
+        if permit_numbers:
+            records = list(db.scalars(select(PermitRecord).where(PermitRecord.permit_number.in_(permit_numbers))))
+        summaries = {
+            record.permit_number.strip().upper(): core._approval_summary_from_data(record_data(record))
+            for record in records
+        }
+        for row in rows:
+            summary = summaries.get(str(row.get("permit_number", "")).strip().upper()) or {}
+            status = str(summary.get("status", "")).strip()
+            if status in {"denied", "pending", "approved", "stopped"}:
+                row["approval_required"] = status != "stopped" or bool(row.get("approval_required"))
+                row["approval_status"] = status
+            if status == "denied":
+                stage = str(summary.get("denied_stage", "")).strip()
+                reason = str(summary.get("denied_reason", "")).strip()
+                denial_line = "Проведение работ запрещено оператором"
+                if stage:
+                    denial_line += f". Этап: {stage}"
+                if reason:
+                    denial_line += f". Причина: {reason}"
+                existing_comment = str(row.get("comment", "")).strip()
+                row["comment"] = f"{existing_comment}\n{denial_line}".strip()
+        return rows
+
+    core.mobile_history = mobile_history_with_decisions
+    for route in core.app.routes:
+        if getattr(route, "path", None) == "/api/mobile/events" and "GET" in (getattr(route, "methods", set()) or set()):
+            route.endpoint = mobile_history_with_decisions
+            if getattr(route, "dependant", None) is not None:
+                route.dependant.call = mobile_history_with_decisions
+            break
+
     original_validate = core.validate_event
 
     def validate_event_with_operator_block(db: Session, payload) -> None:
