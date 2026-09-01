@@ -33,7 +33,7 @@ class OstanovkaMailTests(unittest.TestCase):
             self.assertFalse(
                 worker.process_message(
                     message.as_bytes(),
-                    expected_subject="Реестр остановок",
+                    expected_subjects=["Реестр остановок", "Стоп-лист УКЗ"],
                     sender_filter="*",
                 )
             )
@@ -51,11 +51,42 @@ class OstanovkaMailTests(unittest.TestCase):
             self.assertTrue(
                 worker.process_message(
                     message.as_bytes(),
-                    expected_subject="Реестр остановок",
+                    expected_subjects=["Реестр остановок", "Стоп-лист УКЗ"],
                     sender_filter="*",
                 )
             )
             importer.assert_called_once()
+
+    def test_ukz_subject_accepts_xlsx_attachment(self) -> None:
+        message = email.message.EmailMessage()
+        message["From"] = "outside@example.net"
+        message["To"] = "ostanovka@rpo-mng.ru"
+        message["Subject"] = "Стоп-лист УКЗ"
+        message["Message-ID"] = "<ukz>"
+        message.set_content("test")
+        message.add_attachment(b"xlsx", maintype="application", subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename="Стоп-лист УКЗ.xlsx")
+        with patch.object(worker, "_save_and_import", return_value=True) as importer:
+            self.assertTrue(
+                worker.process_message(
+                    message.as_bytes(),
+                    expected_subjects=["Реестр остановок", "Стоп-лист УКЗ"],
+                    sender_filter="*",
+                )
+            )
+            self.assertEqual(importer.call_args.kwargs["filename"], "Стоп-лист УКЗ.xlsx")
+
+    def test_one_email_can_contain_one_xlsb_and_one_xlsx(self) -> None:
+        message = email.message.EmailMessage()
+        message["From"] = "outside@example.net"
+        message["To"] = "ostanovka@rpo-mng.ru"
+        message["Subject"] = "Реестр остановок"
+        message["Message-ID"] = "<both>"
+        message.set_content("test")
+        message.add_attachment(b"xlsb", maintype="application", subtype="octet-stream", filename="registry.xlsb")
+        message.add_attachment(b"xlsx", maintype="application", subtype="octet-stream", filename="Стоп-лист УКЗ.xlsx")
+        with patch.object(worker, "_save_and_import", return_value=True) as importer:
+            self.assertTrue(worker.process_message(message.as_bytes(), expected_subjects=["Реестр остановок"], sender_filter="*"))
+            self.assertEqual(importer.call_count, 2)
 
     def test_resend_import_stays_disabled_until_required_filters_exist(self) -> None:
         env = {
