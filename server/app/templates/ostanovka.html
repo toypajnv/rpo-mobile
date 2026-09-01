@@ -74,12 +74,17 @@ p.addEventListener('blur',()=>{p.value=normalizeVisiblePass(p.value)});
 function addBlock(item){
   const card=document.createElement('div');card.className='block '+(item.type||'');
   const title=document.createElement('div');title.className='block-title';title.textContent=item.title||'Ограничение доступа';
-  const message=document.createElement('div');message.className='block-message';message.textContent=item.message||'';
-  card.append(title,message);
-  if(item.description){
-    const button=document.createElement('button');button.type='button';button.className='spoiler';button.textContent='Показать описание нарушения';
+  card.append(title);
+  if(item.message){
+    const message=document.createElement('div');message.className='block-message';message.textContent=item.message;
+    card.append(message);
+  }
+  // Details are shown only for the main stop registry. Its description comes
+  // from the column "Причина приостановки работ по Классификатору".
+  if(item.type==='registry' && item.description){
+    const button=document.createElement('button');button.type='button';button.className='spoiler';button.textContent='Показать причину приостановки';
     const detail=document.createElement('div');detail.className='violation';detail.hidden=true;detail.textContent=item.description;
-    button.addEventListener('click',()=>{detail.hidden=!detail.hidden;button.textContent=detail.hidden?'Показать описание нарушения':'Скрыть описание нарушения'});
+    button.addEventListener('click',()=>{detail.hidden=!detail.hidden;button.textContent=detail.hidden?'Показать причину приостановки':'Скрыть причину приостановки'});
     card.append(button,detail);
   }
   blocks.appendChild(card);
@@ -94,7 +99,8 @@ f.addEventListener('submit',async event=>{
     const response=await fetch('/api/ostanovka/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pass_number:p.value.trim()})});
     const data=await response.json();
     if(!response.ok)throw new Error(data.detail||'Ошибка проверки');
-    r.className='result '+data.status;t.textContent=data.title;m.textContent=data.message;
+    r.className='result '+data.status;t.textContent=data.title;
+    m.textContent=data.message||'';m.hidden=!data.message;
     (data.blocks||[]).forEach(addBlock);
     (data.requirements||[]).forEach(item=>{
       const card=document.createElement('div');card.className='req '+item.state;
