@@ -1,5 +1,5 @@
-const CACHE='rpo-pwa-shell-v1.2.0';
-const SHELL=['/app/','/app/manifest.webmanifest','/app/icon-180.png','/app/icon-192.png','/app/icon-512.png','/pwa-assets/app.css?v=20260829-2','/pwa-assets/ux.css?v=20260830-1','/pwa-assets/sync-status.js?v=20260831-1','/pwa-assets/app.js?v=20260829-2','/pwa-assets/ux.js?v=20260830-2','/pwa-assets/deny-lock.js?v=20260831-1'];
+const CACHE='rpo-pwa-shell-v1.2.1';
+const SHELL=['/app/','/app/manifest.webmanifest','/app/icon-180.png','/app/icon-192.png','/app/icon-512.png','/pwa-assets/app.css?v=20260829-2','/pwa-assets/ux.css?v=20260830-1','/pwa-assets/sync-status.js?v=20260831-1','/pwa-assets/app.js?v=20260829-2','/pwa-assets/ux.js?v=20260830-2','/pwa-assets/deny-lock.js?v=20260831-1','/pwa-assets/history-status.js?v=20260901-1'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting()));
