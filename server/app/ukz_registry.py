@@ -106,11 +106,26 @@ def _name_token(value: str) -> str:
     return re.sub(r"[^А-ЯA-Z-]", "", _norm(value))
 
 
-def parse_name(value: object) -> NameParts | None:
+def _name_tokens(value: object) -> list[str]:
     raw = _norm(value)
     if not raw:
-        return None
-    tokens = [_name_token(token) for token in re.split(r"\s+", raw) if _name_token(token)]
+        return []
+    result: list[str] = []
+    for raw_token in re.split(r"\s+", raw):
+        token = _name_token(raw_token)
+        if not token:
+            continue
+        # Corporate files often shorten first name and patronymic as "И.И.".
+        # Preserve them as two independent initials rather than the token "ИИ".
+        if "." in raw_token and 1 < len(token) <= 3 and "-" not in token:
+            result.extend(list(token))
+        else:
+            result.append(token)
+    return result
+
+
+def parse_name(value: object) -> NameParts | None:
+    tokens = _name_tokens(value)
     if not tokens:
         return None
     surname = tokens[0]
@@ -210,8 +225,6 @@ def _description_from_row(values: list[object], description_cols: list[int], fio
     if selected:
         return " • ".join(selected)[:4000]
 
-    # Unknown workbook revisions are tolerated. As a safe fallback use meaningful
-    # non-FIO text, but exclude marker-only cells and very short service values.
     fallback: list[str] = []
     for col, raw in enumerate(values, start=1):
         if col == fio_col:
@@ -243,7 +256,6 @@ def parse_ukz_stoplist(path: str | Path) -> tuple[list[ParsedUkzRecord], int]:
             source_rows += 1
             parts = parse_name(fio_raw)
             if not parts or not parts.first_name:
-                # Surname-only rows are unsafe for automatic matching.
                 continue
             marker_text = _row_marker_text(values, fio_col)
             records.append(
@@ -333,7 +345,6 @@ def _match_score(target: NameParts, candidate: UkzBlockRecord) -> int | None:
         return None
     first_ok, first_score = _component_match(target.first_name, candidate.first_name)
     if not first_ok or first_score == 0:
-        # Never match on surname alone.
         return None
     patronymic_ok, patronymic_score = _component_match(target.patronymic, candidate.patronymic)
     if not patronymic_ok:
@@ -370,9 +381,6 @@ def find_ukz_block(db: Session, fio: str) -> dict | None:
     identities = {record.fio_normalized for record in best}
 
     if len(identities) > 1:
-        # Abbreviated names may remain ambiguous (e.g. same surname and initials).
-        # Fail closed without attributing a sensitive video-analytics reason to
-        # the wrong person.
         return {
             "kind": "corporate",
             "description": "",
