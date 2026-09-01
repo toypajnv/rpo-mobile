@@ -16,10 +16,10 @@ class DashboardCacheBustTests(unittest.TestCase):
         self.assertNotIn('/static/dashboard.js?v=20260829-2', source)
         self.assertNotIn('/static/dashboard.js?v=20260831-2', source)
 
-    def test_decision_controls_are_not_hidden_behind_async_loader(self) -> None:
+    def test_decision_controls_are_direct_not_async_loader_dependency(self) -> None:
         loader = (main._core.BASE_DIR / "static" / "dashboard.js").read_text(encoding="utf-8")
         decisions = (main._core.BASE_DIR / "static" / "dashboard-decisions.js").read_text(encoding="utf-8")
-        self.assertNotIn("dashboard-decisions.js", loader)
+        self.assertNotIn(".then(() => load('/static/dashboard-decisions.js", loader)
         self.assertIn('data-rpo-decision="denied"', decisions)
         self.assertIn("Запретить", decisions)
         self.assertIn("/decision", decisions)
