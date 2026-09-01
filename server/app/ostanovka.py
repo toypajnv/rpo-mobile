@@ -89,6 +89,9 @@ def _apply_access_policy(result: dict, record: StopRegistryRecord | None, *, rea
             "blocks": [],
         }
 
+    # stop_reason is imported from the workbook column
+    # "Причина приостановки работ по Классификатору". This is the only
+    # description that may be exposed in the public spoiler.
     reason = (reason_override if reason_override is not None else (record.stop_reason or "")).strip()
     registry_block = {
         "type": "registry",
@@ -152,22 +155,24 @@ def _apply_ukz_policy(result: dict, ukz_match: dict | None) -> dict:
         block = {
             "type": "video",
             "title": "Блокировка по видеоаналитике",
-            "message": "Блокировка по видеоаналитике",
-            "description": (ukz_match.get("description") or "").strip(),
+            "message": "",
+            # Public violation details are intentionally limited to the main
+            # stop registry. UKZ/video descriptions are not returned to UI.
+            "description": "",
         }
     else:
+        # Keep the corporate-protection reference only once in the card.
         block = {
             "type": "corporate",
-            "title": "Блок корпоративной защиты",
-            "message": "Пропуск заблокирован обратитесь Блок корпоративной защиты",
-            "description": (ukz_match.get("description") or "").strip(),
+            "title": "Пропуск заблокирован",
+            "message": "Обратитесь в Блок корпоративной защиты",
+            "description": "",
         }
     blocks.append(block)
 
-    if len(blocks) == 1:
-        message = block["message"]
-    else:
-        message = "Обнаружено несколько ограничений доступа."
+    # The block card itself carries the single restriction message. Do not
+    # repeat it above the card. For combined restrictions keep one summary.
+    message = "" if len(blocks) == 1 else "Обнаружено несколько ограничений доступа."
     return {
         **result,
         "status": "denied",
