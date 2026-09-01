@@ -230,7 +230,7 @@
     const tools = document.createElement('div');
     tools.id = 'ux-history-tools';
     tools.className = 'ux-history-tools';
-    tools.innerHTML = `<input id="ux-history-search" class="ux-history-search" type="search" placeholder="Номер НД, ФИО или подразделение"><div class="ux-history-filters"><button type="button" class="ux-filter active" data-history-filter="all">Все</button><button type="button" class="ux-filter" data-history-filter="pending">Ожидают</button><button type="button" class="ux-filter" data-history-filter="approved">Разрешено</button></div>`;
+    tools.innerHTML = `<input id="ux-history-search" class="ux-history-search" type="search" placeholder="Номер НД, ФИО или подразделение"><div class="ux-history-filters"><button type="button" class="ux-filter active" data-history-filter="all">Все</button><button type="button" class="ux-filter" data-history-filter="pending">Ожидают</button><button type="button" class="ux-filter" data-history-filter="approved">Разрешено</button><button type="button" class="ux-filter" data-history-filter="denied">Запрещено</button></div>`;
     list.insertAdjacentElement('beforebegin', tools);
     $('ux-history-search').addEventListener('input', applyHistoryFilter);
     tools.querySelectorAll('[data-history-filter]').forEach(button => button.addEventListener('click', () => {
@@ -245,7 +245,7 @@
     document.querySelectorAll('#history-list .history-card').forEach(card => {
       const text = card.textContent.toLowerCase();
       const matchesQuery = !query || text.includes(query);
-      const matchesStatus = historyFilter === 'all' || (historyFilter === 'pending' ? /ожидает разрешения/i.test(text) : /разрешено/i.test(text));
+      const matchesStatus = historyFilter === 'all' || (historyFilter === 'pending' ? /ожидает разрешения/i.test(text) : historyFilter === 'denied' ? /проведение запрещено|запрещено/i.test(text) : /разрешено/i.test(text));
       card.hidden = !(matchesQuery && matchesStatus);
     });
   }

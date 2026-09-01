@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const PWA_VERSION = '1.0.1';
+  const PWA_VERSION = '1.2.1';
   const ANDROID_API_VERSION = '2.0.1';
   const UNITS = ['ЦДПН-1','ЦДПН-2','ЦДПН-3','ЦДПН-4','ЦППН-1','ЦППН-2','ЦСДиТГ','ЦСиР','ЦТОиРТ-1','ЦТОиРТ-2'];
   const STAGES = [
