@@ -1,0 +1,111 @@
+name: Patch history denial release contract
+
+on:
+  push:
+    branches: [fix/history-denied-status-20260901]
+    paths:
+      - '.github/workflows/patch-history-release-contract.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/history-denied-status-20260901
+      - name: Patch PWA shell, tests and smoke contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=None):
+              p=Path(path); s=p.read_text(encoding='utf-8')
+              if old not in s:
+                  raise SystemExit(f'marker not found in {path}: {old[:100]!r}')
+              s=s.replace(old,new) if count is None else s.replace(old,new,count)
+              p.write_text(s,encoding='utf-8')
+
+          # Make the static PWA shell itself advertise/load the new history status layer.
+          replace('server/app/pwa/index.html',
+                  'PWA 1.2.0 · разрешение и запрет оператором · единая система с Android РПО 2.2.0.',
+                  'PWA 1.2.1 · статусы запрета в истории · единая система с Android РПО 2.2.1.')
+          replace('server/app/pwa/index.html',
+                  '  <script src="/pwa-assets/deny-lock.js?v=20260831-1" defer></script>\n</body>',
+                  '  <script src="/pwa-assets/deny-lock.js?v=20260831-1" defer></script>\n  <script src="/pwa-assets/history-status.js?v=20260901-1" defer></script>\n</body>')
+          replace('server/app/pwa/app.js', "const PWA_VERSION = '1.0.1';", "const PWA_VERSION = '1.2.1';", 1)
+
+          # Add a first-class denied filter to iOS history UX.
+          replace('server/app/pwa/ux.js',
+                  '<button type="button" class="ux-filter" data-history-filter="approved">Разрешено</button></div>',
+                  '<button type="button" class="ux-filter" data-history-filter="approved">Разрешено</button><button type="button" class="ux-filter" data-history-filter="denied">Запрещено</button></div>')
+          replace('server/app/pwa/ux.js',
+                  "const matchesStatus = historyFilter === 'all' || (historyFilter === 'pending' ? /ожидает разрешения/i.test(text) : /разрешено/i.test(text));",
+                  "const matchesStatus = historyFilter === 'all' || (historyFilter === 'pending' ? /ожидает разрешения/i.test(text) : historyFilter === 'denied' ? /проведение запрещено|запрещено/i.test(text) : /разрешено/i.test(text));")
+
+          # Existing Python tests: advance release versions/cache and assert the new asset.
+          p=Path('server/tests/test_pwa.py'); s=p.read_text(encoding='utf-8')
+          s=s.replace("const CACHE='rpo-pwa-shell-v1.2.0'", "const CACHE='rpo-pwa-shell-v1.2.1'")
+          s=s.replace("self.assertIn('PWA 1.2.0', html)", "self.assertIn('PWA 1.2.1', html)")
+          s=s.replace("self.assertEqual(data['latest_app_version'], '2.2.0')", "self.assertEqual(data['latest_app_version'], '2.2.1')")
+          s=s.replace("self.assertEqual(data['pwa_version'], '1.2.0')", "self.assertEqual(data['pwa_version'], '1.2.1')")
+          s=s.replace("self.assertEqual(data['server_version'], '0.7.0')", "self.assertEqual(data['server_version'], '0.7.1')")
+          marker="        self.assertIn('/pwa-assets/deny-lock.js?v=20260831-1', sw)\n"
+          if marker not in s: raise SystemExit('test_pwa asset marker missing')
+          s=s.replace(marker, marker+"        self.assertIn('/pwa-assets/history-status.js?v=20260901-1', html)\n        self.assertIn('/pwa-assets/history-status.js?v=20260901-1', sw)\n",1)
+          marker2="            deny = client.get('/pwa-assets/deny-lock.js')\n            self.assertEqual(deny.status_code, 200)\n            self.assertIn('ПРОВЕДЕНИЕ РАБОТ ЗАПРЕЩЕНО', deny.text)\n"
+          if marker2 not in s: raise SystemExit('test_pwa route marker missing')
+          s=s.replace(marker2, marker2+"\n            history_status = client.get('/pwa-assets/history-status.js')\n            self.assertEqual(history_status.status_code, 200)\n            self.assertIn('Проведение запрещено', history_status.text)\n",1)
+          p.write_text(s,encoding='utf-8')
+
+          p=Path('server/tests/test_ux21_assets.py'); s=p.read_text(encoding='utf-8')
+          s=s.replace('self.assertEqual(main.app.version, "0.7.0")','self.assertEqual(main.app.version, "0.7.1")')
+          s=s.replace('self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.0")','self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.1")')
+          s=s.replace('self.assertEqual(main.PWA_VERSION, "1.2.0")','self.assertEqual(main.PWA_VERSION, "1.2.1")')
+          s=s.replace('v2.2.0-test/rpo-mobile-2.2.0.apk','v2.2.1-test/rpo-mobile-2.2.1.apk')
+          s=s.replace('PWA 1.2.0','PWA 1.2.1')
+          s=s.replace('rpo-pwa-shell-v1.2.0','rpo-pwa-shell-v1.2.1')
+          marker="        deny = (APP_DIR / \"pwa\" / \"deny-lock.js\").read_text(encoding=\"utf-8\")\n"
+          if marker not in s: raise SystemExit('ux assets marker missing')
+          s=s.replace(marker, marker+'        history_status = (APP_DIR / "pwa" / "history-status.js").read_text(encoding="utf-8")\n',1)
+          marker="        self.assertIn(\"rpo_pwa_denied_permit_v1\", deny)\n"
+          if marker not in s: raise SystemExit('ux deny assertion marker missing')
+          s=s.replace(marker, marker+'        self.assertIn("Проведение запрещено", history_status)\n        self.assertIn("history-denied", history_status)\n        self.assertIn("history-status.js?v=20260901-1", sw)\n',1)
+          p.write_text(s,encoding='utf-8')
+
+          # Production smoke: advance versions and verify the actual history-status asset.
+          p=Path('.github/workflows/production-smoke.yml'); s=p.read_text(encoding='utf-8')
+          s=s.replace('"server_version":"0.7.0"','"server_version":"0.7.1"')
+          s=s.replace('"latest_app_version":"2.2.0"','"latest_app_version":"2.2.1"')
+          s=s.replace('"pwa_version":"1.2.0"','"pwa_version":"1.2.1"')
+          s=s.replace('PWA 1.2.0','PWA 1.2.1')
+          s=s.replace('Android 2.2.0 / PWA 1.2.0','Android 2.2.1 / PWA 1.2.1')
+          s=s.replace('rpo-pwa-shell-v1.2.0','rpo-pwa-shell-v1.2.1')
+          s=s.replace("cfg['latest_app_version']=='2.2.0'", "cfg['latest_app_version']=='2.2.1'")
+          s=s.replace("cfg['pwa_version']=='1.2.0'", "cfg['pwa_version']=='1.2.1'")
+          s=s.replace("cfg['server_version']=='0.7.0'", "cfg['server_version']=='0.7.1'")
+          marker="          grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/rpo-pwa.html\n"
+          if marker not in s: raise SystemExit('smoke pwa marker missing')
+          s=s.replace(marker, marker+"          grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/rpo-pwa.html\n",1)
+          marker="          grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/sw.js\n"
+          if marker not in s: raise SystemExit('smoke sw marker missing')
+          s=s.replace(marker, marker+"          grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/sw.js\n",1)
+          marker="          grep -F 'При отсутствии сети ранее полученный запрет сохраняется' /tmp/pwa-deny-lock.js\n"
+          if marker not in s: raise SystemExit('smoke deny marker missing')
+          s=s.replace(marker, marker+"\n          curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/history-status.js -o /tmp/pwa-history-status.js\n          grep -F 'Проведение запрещено' /tmp/pwa-history-status.js\n          grep -F 'history-denied' /tmp/pwa-history-status.js\n          grep -F '/api/mobile/permit?permit_number=' /tmp/pwa-history-status.js\n",1)
+          p.write_text(s,encoding='utf-8')
+
+          Path('.github/workflows/patch-history-release-contract.yml').unlink()
+          PY
+      - name: Commit release contract and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add server/app/pwa/index.html server/app/pwa/app.js server/app/pwa/ux.js server/tests/test_pwa.py server/tests/test_ux21_assets.py .github/workflows/production-smoke.yml .github/workflows/patch-history-release-contract.yml
+          git commit -m "Align iOS Android history denial release contract"
+          git push origin HEAD:fix/history-denied-status-20260901
