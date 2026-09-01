@@ -28,7 +28,7 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.7.1"
+_core.app.version = "0.7.0"
 
 
 def _install_dashboard_assets() -> None:
