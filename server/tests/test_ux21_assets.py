@@ -10,8 +10,8 @@ APP_DIR = SERVER_DIR / "app"
 
 class Ux21AssetsTest(unittest.TestCase):
     def test_public_versions_are_updated_without_breaking_legacy_support(self):
-        self.assertEqual(main.app.version, "0.7.1")
-        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.1")
+        self.assertEqual(main.app.version, "0.7.2")
+        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.2")
         self.assertEqual(main.PWA_VERSION, "1.2.1")
         self.assertEqual(main.MIN_SUPPORTED_MOBILE_VERSION, "1.0.1")
         self.assertIn("v2.2.1-test/rpo-mobile-2.2.1.apk", main.MOBILE_APK_URL)
