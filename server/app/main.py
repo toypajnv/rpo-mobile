@@ -16,9 +16,9 @@ for _name in dir(_core):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_core, _name)
 
-LATEST_MOBILE_VERSION = "2.2.1"
+LATEST_MOBILE_VERSION = "2.2.2"
 MIN_SUPPORTED_MOBILE_VERSION = _core.MIN_SUPPORTED_MOBILE_VERSION
-MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.2.1-test/rpo-mobile-2.2.1.apk"
+MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.2.2-test/rpo-mobile-2.2.2.apk"
 PWA_VERSION = "1.2.1"
 PWA_URL = _core.PWA_URL
 DASHBOARD_ASSET_VERSION = "20260901-2"
@@ -29,7 +29,7 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.7.1"
+_core.app.version = "0.7.2"
 
 
 def _install_dashboard_assets() -> None:
@@ -87,7 +87,7 @@ async def inject_pwa_release_hotfixes(request, call_next):
             source = source.replace("</body>", f"  {history_tag}\n</body>")
         source = source.replace(
             "PWA 1.2.0 · разрешение и запрет оператором · единая система с Android РПО 2.2.0.",
-            "PWA 1.2.1 · статусы запрета в истории · единая система с Android РПО 2.2.1.",
+            "PWA 1.2.1 · статусы запрета в истории · единая система с Android РПО 2.2.2.",
         )
         return HTMLResponse(
             source,
