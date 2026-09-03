@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and mobile history denial release
+      - name: Wait for VPS autodeploy and manager read-only release
         shell: bash
         run: |
           set -euo pipefail
@@ -25,24 +25,26 @@ jobs:
             config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=2.1.0' 2>/dev/null || true)"
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
             dashboard_loader="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard.js 2>/dev/null || true)"
+            openapi="$(curl -fsS --max-time 8 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
             if [[ "$health" == *'"status":"ok"'* ]] \
-              && [[ "$config" == *'"server_version":"0.7.1"'* ]] \
-              && [[ "$config" == *'"latest_app_version":"2.2.1"'* ]] \
+              && [[ "$config" == *'"server_version":"0.7.2"'* ]] \
+              && [[ "$config" == *'"latest_app_version":"2.2.2"'* ]] \
               && [[ "$config" == *'"pwa_version":"1.2.1"'* ]] \
               && [[ "$pwa" == *'PWA 1.2.1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/deny-lock.js?v=20260831-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/history-status.js?v=20260901-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/sync-status.js?v=20260831-1'* ]] \
-              && [[ "$dashboard_loader" == *'dashboard-decisions.js?v=20260831-1'* ]]; then
-              echo "Production Android 2.2.1 / PWA 1.2.1 / mobile history denial release deployed on attempt $attempt"
+              && [[ "$dashboard_loader" == *'dashboard-decisions.js?v=20260831-1'* ]] \
+              && [[ "$openapi" == *'"/users/create"'* ]]; then
+              echo "Production Android 2.2.2 / PWA 1.2.1 / manager read-only release deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for mobile history denial release autodeploy: attempt $attempt/36"
+            echo "Waiting for manager read-only autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Mobile history denial release did not become ready in time" >&2
+            echo "Manager read-only release did not become ready in time" >&2
             exit 1
           fi
 
@@ -131,7 +133,7 @@ jobs:
           grep -F '/decision' /tmp/dashboard-decisions.js
           test -s /tmp/dashboard-core.js
 
-      - name: Verify mobile and operator decision API contract is deployed
+      - name: Verify mobile, operator and manager API contract is deployed
         shell: bash
         run: |
           set -euo pipefail
@@ -149,13 +151,16 @@ jobs:
               '/api/operator/events/{event_id}/approve',
               '/api/operator/events/{event_id}/decision',
               '/api/operator/analytics',
+              '/users/create',
           ]
           for route in required:
               assert route in paths, f'Missing deployed API route: {route}'
               print(f'Deployed API route confirmed: {route}')
           decision = paths['/api/operator/events/{event_id}/decision']['post']
           assert 'requestBody' in decision
-          print('Operator decision request body confirmed')
+          manager_create = paths['/users/create']['post']
+          assert 'requestBody' in manager_create
+          print('Operator decision and manager user creation contracts confirmed')
           PY
 
       - name: Verify rollback compatibility status
@@ -168,12 +173,12 @@ jobs:
           from pathlib import Path
           cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
           assert cfg['status']=='ok'
-          assert cfg['latest_app_version']=='2.2.1'
+          assert cfg['latest_app_version']=='2.2.2'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
           assert cfg['pwa_version']=='1.2.1'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
-          assert cfg['server_version']=='0.7.1'
+          assert cfg['server_version']=='0.7.2'
           assert cfg['minimum_supported_version']=='1.0.1'
-          print('Older APKs remain supported; history denial release contract confirmed')
+          print('Older APKs remain supported; manager read-only release contract confirmed')
           PY
