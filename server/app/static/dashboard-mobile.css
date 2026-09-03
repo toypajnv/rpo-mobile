@@ -11,11 +11,12 @@
 .mobile-phone .mobile-brand{display:flex;align-items:center;gap:9px;min-width:0}
 .mobile-phone .mobile-brand-mark{width:37px;height:37px;border-radius:11px;display:grid;place-items:center;background:#eaf2ff;color:#0d63e6;font-size:20px;font-weight:900;border:1px solid #cfe0fb}
 .mobile-phone .mobile-brand b{font-size:17px;line-height:1.1;color:#122033;white-space:nowrap}
-.mobile-phone .mobile-user-area{display:flex;align-items:center;gap:8px;min-width:0}
+.mobile-phone .mobile-user-area{display:flex;align-items:center;gap:8px;min-width:0;position:relative}
+.mobile-phone .mobile-user-name{max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#0d63e6;font-size:12px;font-weight:800}
 .mobile-phone .mobile-online{display:inline-flex;align-items:center;gap:5px;color:#149447;font-size:12px;font-weight:800;white-space:nowrap}
 .mobile-phone .mobile-online i{width:8px;height:8px;border-radius:50%;background:#20bf5b;box-shadow:0 0 0 4px rgba(32,191,91,.12)}
-.mobile-phone .mobile-more-button{width:38px;height:38px;border:1px solid #dce5f0;background:#fff;color:#315271;font-size:22px;font-weight:900;border-radius:12px;display:grid;place-items:center;line-height:1}
-.mobile-phone .mobile-more-menu{position:absolute;right:12px;top:54px;min-width:210px;padding:7px;background:#fff;border:1px solid #dfe7f1;border-radius:14px;box-shadow:0 16px 40px rgba(23,48,80,.18);display:grid;gap:3px;z-index:140}
+.mobile-phone .mobile-more-button{width:38px;height:38px;border:1px solid #dce5f0;background:#fff;color:#315271;font-size:22px;font-weight:900;border-radius:12px;display:grid;place-items:center;line-height:1;flex:0 0 auto}
+.mobile-phone .mobile-more-menu{position:absolute;right:0;top:43px;min-width:210px;padding:7px;background:#fff;border:1px solid #dfe7f1;border-radius:14px;box-shadow:0 16px 40px rgba(23,48,80,.18);display:grid;gap:3px;z-index:140}
 .mobile-phone .mobile-more-menu[hidden]{display:none!important}
 .mobile-phone .mobile-more-menu a,.mobile-phone .mobile-more-menu button{display:flex;width:100%;align-items:center;gap:8px;text-decoration:none;text-align:left;padding:11px 12px;border-radius:9px;background:transparent;color:#263b55;font-weight:700;font-size:14px}
 .mobile-phone .mobile-more-menu a:active,.mobile-phone .mobile-more-menu button:active{background:#eef5ff}
