@@ -217,14 +217,14 @@ private fun UxWorkScreen(
     modifier: Modifier = Modifier,
 ) {
     val permitReady = s.permitNumber.trim().length >= 3 && s.workerName.trim().length >= 3 && s.structuralUnit in structuralUnits
-    var editDetails by remember(s.permitNumber) { mutableStateOf(!permitReady) }
+    var editDetails by remember { mutableStateOf(!permitReady) }
     var pendingStage by remember(s.permitNumber) { mutableStateOf<Stage?>(null) }
     var baseline by remember(s.permitNumber, s.stage.id, s.serverSavedStageIds) { mutableStateOf(uxFingerprint(s)) }
     val hasUnsavedChanges = uxFingerprint(s) != baseline
 
-    LaunchedEffect(permitReady) {
-        if (permitReady) editDetails = false
-    }
+    // Do not collapse the permit details while the worker is typing the permit number.
+    // Previously the form became "ready" after the third symbol and immediately closed,
+    // forcing the worker to tap "Изменить" repeatedly to finish the same number.
 
     pendingStage?.let { target ->
         AlertDialog(
