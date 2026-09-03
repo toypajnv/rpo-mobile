@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and manager read-only release
+      - name: Wait for VPS autodeploy and phone dashboard release
         shell: bash
         run: |
           set -euo pipefail
@@ -25,9 +25,11 @@ jobs:
             config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=2.1.0' 2>/dev/null || true)"
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
             dashboard_loader="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard.js 2>/dev/null || true)"
+            mobile_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-mobile.js 2>/dev/null || true)"
+            mobile_css="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-mobile.css 2>/dev/null || true)"
             openapi="$(curl -fsS --max-time 8 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
             if [[ "$health" == *'"status":"ok"'* ]] \
-              && [[ "$config" == *'"server_version":"0.7.2"'* ]] \
+              && [[ "$config" == *'"server_version":"0.7.3"'* ]] \
               && [[ "$config" == *'"latest_app_version":"2.2.2"'* ]] \
               && [[ "$config" == *'"pwa_version":"1.2.1"'* ]] \
               && [[ "$pwa" == *'PWA 1.2.1'* ]] \
@@ -35,16 +37,20 @@ jobs:
               && [[ "$pwa" == *'/pwa-assets/history-status.js?v=20260901-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/sync-status.js?v=20260831-1'* ]] \
               && [[ "$dashboard_loader" == *'dashboard-decisions.js?v=20260831-1'* ]] \
+              && [[ "$mobile_js" == *'PHONE_SHORT_SIDE_MAX = 540'* ]] \
+              && [[ "$mobile_js" == *'data-mobile-label'* ]] \
+              && [[ "$mobile_css" == *'.mobile-phone .mobile-tabbar'* ]] \
+              && [[ "$mobile_css" == *'.mobile-phone .table-wrap tbody tr'* ]] \
               && [[ "$openapi" == *'"/users/create"'* ]]; then
-              echo "Production Android 2.2.2 / PWA 1.2.1 / manager read-only release deployed on attempt $attempt"
+              echo "Production phone-only adaptive dashboard 0.7.3 deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for manager read-only autodeploy: attempt $attempt/36"
+            echo "Waiting for phone dashboard autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Manager read-only release did not become ready in time" >&2
+            echo "Phone dashboard release did not become ready in time" >&2
             exit 1
           fi
 
@@ -116,7 +122,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify operator dashboard decision controls
+      - name: Verify operator dashboard and phone adaptive assets
         shell: bash
         run: |
           set -euo pipefail
@@ -124,6 +130,8 @@ jobs:
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-core.js -o /tmp/dashboard-core.js
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-ux.js -o /tmp/dashboard-ux.js
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-decisions.js -o /tmp/dashboard-decisions.js
+          curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-mobile.js -o /tmp/dashboard-mobile.js
+          curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-mobile.css -o /tmp/dashboard-mobile.css
           grep -F 'dashboard-core.js?v=20260830-1' /tmp/dashboard-loader.js
           grep -F 'dashboard-ux.js?v=20260830-1' /tmp/dashboard-loader.js
           grep -F 'dashboard-decisions.js?v=20260831-1' /tmp/dashboard-loader.js
@@ -131,6 +139,12 @@ jobs:
           grep -F 'data-rpo-decision="denied"' /tmp/dashboard-decisions.js
           grep -F 'ПРОВЕДЕНИЕ ЗАПРЕЩЕНО' /tmp/dashboard-decisions.js
           grep -F '/decision' /tmp/dashboard-decisions.js
+          grep -F 'PHONE_SHORT_SIDE_MAX = 540' /tmp/dashboard-mobile.js
+          grep -F "'(pointer: coarse)'" /tmp/dashboard-mobile.js
+          grep -F 'mobile-dashboard-header' /tmp/dashboard-mobile.js
+          grep -F 'data-mobile-label' /tmp/dashboard-mobile.js
+          grep -F '.mobile-phone .mobile-tabbar' /tmp/dashboard-mobile.css
+          grep -F '.mobile-phone .table-wrap tbody tr' /tmp/dashboard-mobile.css
           test -s /tmp/dashboard-core.js
 
       - name: Verify mobile, operator and manager API contract is deployed
@@ -178,7 +192,7 @@ jobs:
           assert cfg['update_available'] is True
           assert cfg['pwa_version']=='1.2.1'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
-          assert cfg['server_version']=='0.7.2'
+          assert cfg['server_version']=='0.7.3'
           assert cfg['minimum_supported_version']=='1.0.1'
-          print('Older APKs remain supported; manager read-only release contract confirmed')
+          print('Older APKs remain supported; phone dashboard release contract confirmed')
           PY
