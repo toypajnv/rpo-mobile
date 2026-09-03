@@ -14,7 +14,7 @@ class Ux21AssetsTest(unittest.TestCase):
         self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.2")
         self.assertEqual(main.PWA_VERSION, "1.2.1")
         self.assertEqual(main.MIN_SUPPORTED_MOBILE_VERSION, "1.0.1")
-        self.assertIn("v2.2.1-test/rpo-mobile-2.2.1.apk", main.MOBILE_APK_URL)
+        self.assertIn("v2.2.2-test/rpo-mobile-2.2.2.apk", main.MOBILE_APK_URL)
 
     def test_dashboard_core_is_preserved_and_operator_decisions_are_layered(self):
         loader = (APP_DIR / "static" / "dashboard.js").read_text(encoding="utf-8")
