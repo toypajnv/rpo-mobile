@@ -22,6 +22,7 @@ MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.2.
 PWA_VERSION = "1.2.1"
 PWA_URL = _core.PWA_URL
 DASHBOARD_ASSET_VERSION = "20260901-2"
+DASHBOARD_PHONE_VERSION = "20260903-1"
 PWA_ENTRY_HOTFIX_VERSION = "20260901-1"
 PWA_HISTORY_STATUS_VERSION = "20260901-1"
 
@@ -29,11 +30,11 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.7.2"
+_core.app.version = "0.7.3"
 
 
 def _install_dashboard_assets() -> None:
-    """Serve a fresh dashboard loader, decision controls and role-aware panel UI."""
+    """Serve fresh dashboard controls, roles and a phone-only adaptive interface."""
     template_name = "dashboard.html"
     source_path = _core.BASE_DIR / "templates" / template_name
     source = source_path.read_text(encoding="utf-8")
@@ -45,6 +46,20 @@ def _install_dashboard_assets() -> None:
         source = source.replace(old_loader, loader)
     if loader not in source:
         raise RuntimeError("Dashboard loader reference was not found")
+
+    # Detect a real phone before paint. Tablets have a short CSS screen side above
+    # 540 px and therefore retain the unchanged desktop/tablet dashboard.
+    phone_assets = f"""
+<script id=\"dashboard-phone-detect\">(() => {{
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const shortSide = Math.min(window.screen?.width || innerWidth, window.screen?.height || innerHeight);
+  if (coarse && shortSide <= 540) document.documentElement.classList.add('mobile-phone');
+}})();</script>
+<link rel=\"stylesheet\" href=\"/static/dashboard-mobile.css?v={DASHBOARD_PHONE_VERSION}\">
+<script src=\"/static/dashboard-mobile.js?v={DASHBOARD_PHONE_VERSION}\" defer></script>
+"""
+    if "dashboard-phone-detect" not in source:
+        source = source.replace("</head>", f"{phone_assets}</head>", 1)
 
     # Role marker is rendered from the authenticated server user. Existing users
     # remain operators by default; managers receive the read-only presentation.

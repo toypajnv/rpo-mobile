@@ -1,0 +1,131 @@
+/* Phone-only adaptive dashboard. Activated by dashboard-mobile.js on coarse-pointer
+   devices with a short screen side <= 540 CSS px. Tablets keep the desktop UI. */
+
+.mobile-phone body.app-body{background:#f4f7fb;overflow-x:hidden}
+.mobile-phone .sidebar{display:none!important}
+.mobile-phone .main{margin-left:0!important;padding:14px 14px calc(28px + env(safe-area-inset-bottom))!important;width:100%;max-width:100vw;overflow:hidden}
+.mobile-phone .main>header{display:none!important}
+
+.mobile-phone .mobile-dashboard-header{position:sticky;top:0;z-index:120;background:rgba(255,255,255,.96);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid #dfe7f1;box-shadow:0 5px 20px rgba(25,52,86,.08);padding-top:max(8px,env(safe-area-inset-top))}
+.mobile-phone .mobile-dashboard-headline{height:58px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 14px}
+.mobile-phone .mobile-brand{display:flex;align-items:center;gap:9px;min-width:0}
+.mobile-phone .mobile-brand-mark{width:37px;height:37px;border-radius:11px;display:grid;place-items:center;background:#eaf2ff;color:#0d63e6;font-size:20px;font-weight:900;border:1px solid #cfe0fb}
+.mobile-phone .mobile-brand b{font-size:17px;line-height:1.1;color:#122033;white-space:nowrap}
+.mobile-phone .mobile-user-area{display:flex;align-items:center;gap:8px;min-width:0;position:relative}
+.mobile-phone .mobile-user-name{max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#0d63e6;font-size:12px;font-weight:800}
+.mobile-phone .mobile-online{display:inline-flex;align-items:center;gap:5px;color:#149447;font-size:12px;font-weight:800;white-space:nowrap}
+.mobile-phone .mobile-online i{width:8px;height:8px;border-radius:50%;background:#20bf5b;box-shadow:0 0 0 4px rgba(32,191,91,.12)}
+.mobile-phone .mobile-more-button{width:38px;height:38px;border:1px solid #dce5f0;background:#fff;color:#315271;font-size:22px;font-weight:900;border-radius:12px;display:grid;place-items:center;line-height:1;flex:0 0 auto}
+.mobile-phone .mobile-more-menu{position:absolute;right:0;top:43px;min-width:210px;padding:7px;background:#fff;border:1px solid #dfe7f1;border-radius:14px;box-shadow:0 16px 40px rgba(23,48,80,.18);display:grid;gap:3px;z-index:140}
+.mobile-phone .mobile-more-menu[hidden]{display:none!important}
+.mobile-phone .mobile-more-menu a,.mobile-phone .mobile-more-menu button{display:flex;width:100%;align-items:center;gap:8px;text-decoration:none;text-align:left;padding:11px 12px;border-radius:9px;background:transparent;color:#263b55;font-weight:700;font-size:14px}
+.mobile-phone .mobile-more-menu a:active,.mobile-phone .mobile-more-menu button:active{background:#eef5ff}
+
+.mobile-phone .mobile-tabbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid #edf1f6;padding:0 4px;background:#fff}
+.mobile-phone .mobile-tabbar a{min-width:0;height:64px;padding:7px 2px 6px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;text-decoration:none;color:#708198;border-bottom:3px solid transparent;font-size:10.5px;font-weight:700;line-height:1.05;text-align:center}
+.mobile-phone .mobile-tabbar a .mobile-nav-icon{font-size:18px;line-height:1}
+.mobile-phone .mobile-tabbar a.active{color:#0d63e6;border-bottom-color:#0d63e6}
+
+.mobile-phone .manager-readonly-banner{margin:10px 0!important;padding:10px 12px!important;font-size:12px!important;line-height:1.35!important;border-radius:12px!important}
+.mobile-phone #rpo-blocked-banner{margin:10px 0!important;padding:11px 12px!important;font-size:12px!important;line-height:1.4!important}
+
+.mobile-phone .global-filter{margin:0 0 12px!important;padding:11px!important;display:grid!important;grid-template-columns:minmax(0,1fr) auto;gap:9px;background:#fff;border:1px solid #dfe7f1;border-radius:15px;box-shadow:0 4px 16px rgba(24,50,82,.05)}
+.mobile-phone .global-filter[hidden]{display:none!important}
+.mobile-phone .global-filter .search-field{grid-column:1/-1;display:flex;align-items:center;gap:7px;font-size:18px;font-weight:700;color:#607086}
+.mobile-phone .global-filter .search-field input{font-size:16px;padding:12px;border-radius:11px;min-width:0}
+.mobile-phone .global-filter .unit-filter{font-size:11px;min-width:0}
+.mobile-phone .global-filter select{width:100%;min-width:0;height:45px;padding:0 34px 0 11px;border:1px solid #cfd9e6;border-radius:11px;background:#fff;color:#20344d;font:inherit;font-size:13px}
+.mobile-phone .global-filter .filter-reset{align-self:end;height:45px;padding:0 13px;background:#eef5ff;color:#1255a6;border:1px solid #d4e4fb;font-weight:800}
+
+.mobile-phone .panel{padding:15px;border-radius:18px;box-shadow:0 5px 18px rgba(24,50,82,.06)}
+.mobile-phone .panel-title{align-items:flex-start;gap:10px;margin-bottom:12px}
+.mobile-phone .panel-title h2,.mobile-phone .panel>h2{font-size:22px;line-height:1.15;margin-bottom:5px}
+.mobile-phone .panel-note{font-size:13px!important;line-height:1.45}
+.mobile-phone .online{font-size:11px;padding-top:3px;white-space:nowrap}
+
+/* Home: match the approved mockup — work state first, quick actions second. */
+.mobile-phone #tab-home>.stats{display:none!important}
+.mobile-phone .home-grid{display:grid!important;grid-template-columns:1fr!important;gap:13px!important}
+.mobile-phone .status-summary{grid-template-columns:1fr 1fr!important;gap:10px!important;margin-top:10px}
+.mobile-phone .status-summary button{min-height:112px;padding:16px 14px;border-radius:15px;background:#f8faff;border:1px solid #dfe7f1;text-align:left;position:relative}
+.mobile-phone .status-summary b{font-size:34px;line-height:1;color:#07346b}
+.mobile-phone .status-summary span{font-size:14px;margin-top:10px;color:#718096}
+.mobile-phone .quick-actions{grid-template-columns:1fr!important;gap:9px!important}
+.mobile-phone .quick-actions button{min-height:58px;padding:12px 15px;border-radius:13px;font-size:15px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mobile-phone .quick-actions button::after{content:'›';font-size:28px;font-weight:400;line-height:1;color:#0d63e6}
+.mobile-phone .mobile-extra-metrics{margin-top:13px;border:1px solid #dfe7f1;border-radius:15px;background:#fff;overflow:hidden}
+.mobile-phone .mobile-extra-metrics>summary{padding:13px 15px;cursor:pointer;font-weight:800;color:#315271;list-style:none}
+.mobile-phone .mobile-extra-metrics>summary::-webkit-details-marker{display:none}
+.mobile-phone .mobile-extra-metrics>summary::after{content:'⌄';float:right;color:#0d63e6}
+.mobile-phone .mobile-extra-metrics[open]>summary::after{content:'⌃'}
+.mobile-phone .mobile-extra-metrics .stats{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;padding:0 10px 10px;margin:0!important}
+.mobile-phone .mobile-extra-metrics .stats article{padding:11px!important;border-radius:12px!important;min-height:92px;box-shadow:none!important;gap:9px!important}
+.mobile-phone .mobile-extra-metrics .stats article:last-child{grid-column:1/-1}
+.mobile-phone .mobile-extra-metrics .round{width:34px;height:34px;font-size:15px;flex:0 0 auto}
+.mobile-phone .mobile-extra-metrics .stats strong{font-size:22px}
+.mobile-phone .mobile-extra-metrics .stats .small-strong{font-size:14px}
+
+/* Turn data tables into vertical cards. JS keeps data-mobile-label in sync after refresh. */
+.mobile-phone .table-wrap,.mobile-phone .table-wrap.tall{overflow:visible!important;max-height:none!important;border:0!important}
+.mobile-phone .table-wrap table{display:block;width:100%;font-size:13px;white-space:normal}
+.mobile-phone .table-wrap thead{display:none!important}
+.mobile-phone .table-wrap tbody{display:grid;width:100%;gap:10px}
+.mobile-phone .table-wrap tbody tr{display:block;width:100%;position:relative;background:#fff;border:1px solid #dfe7f1;border-radius:16px;padding:10px 12px;box-shadow:0 4px 15px rgba(24,50,82,.05);overflow:hidden}
+.mobile-phone .table-wrap tbody tr.rpo-blocked{border-color:#f3b2aa;background:#fff8f7}
+.mobile-phone .table-wrap tbody tr.rpo-blocked>td{background:transparent!important}
+.mobile-phone .table-wrap td{display:grid;grid-template-columns:104px minmax(0,1fr);gap:10px;align-items:start;width:100%;padding:8px 0;border-bottom:1px solid #eef2f7;white-space:normal;min-width:0;overflow-wrap:anywhere}
+.mobile-phone .table-wrap td:last-child{border-bottom:0}
+.mobile-phone .table-wrap td::before{content:attr(data-mobile-label);display:block;color:#74839a;font-size:11px;font-weight:800;line-height:1.25}
+.mobile-phone .table-wrap td>*{max-width:100%}
+.mobile-phone .table-wrap .wrap-cell{min-width:0}
+.mobile-phone .table-wrap .decision-controls{gap:7px}
+.mobile-phone .table-wrap .allow-button,.mobile-phone .table-wrap .deny-button,.mobile-phone .table-wrap .approve-button,.mobile-phone .table-wrap .danger-button{min-height:42px;padding:9px 12px;font-size:13px}
+.mobile-phone .table-wrap .badge{font-size:11px;padding:6px 9px;white-space:normal}
+.mobile-phone .table-wrap .unit-pill{font-size:12px}
+
+/* Work cards: permit and state visually lead; detail rows remain expandable. */
+.mobile-phone #works-body tr{padding-top:13px}
+.mobile-phone #works-body td:nth-child(3){display:block;padding:5px 0 8px;border-bottom:0}
+.mobile-phone #works-body td:nth-child(3)::before{display:none}
+.mobile-phone #works-body td:nth-child(3)>b{font-size:22px;color:#0a3d78;letter-spacing:.2px}
+.mobile-phone #works-body td:nth-child(5){padding-top:4px}
+.mobile-phone #works-body td:nth-child(6) .blocked-permit-note{font-size:11px;line-height:1.35;max-width:none;margin-top:6px}
+.mobile-phone #works-body .progress{width:100%;height:8px;margin-top:3px}
+.mobile-phone #works-body .stage-details{width:100%}
+.mobile-phone #works-body .stage-details summary{min-width:0;white-space:normal}
+.mobile-phone #works-body .stage-detail-list{min-width:0}
+.mobile-phone #works-body .stage-detail-line{grid-template-columns:1fr!important;gap:7px!important;white-space:normal!important}
+.mobile-phone #works-body .stage-detail-line strong,.mobile-phone #works-body .stage-detail-line em{overflow-wrap:anywhere}
+
+/* Transmission cards: permit number is prominent. */
+.mobile-phone #transmissions-body td:nth-child(4){display:block;padding:5px 0 8px;border-bottom:0}
+.mobile-phone #transmissions-body td:nth-child(4)::before{display:none}
+.mobile-phone #transmissions-body td:nth-child(4)>b{font-size:22px;color:#0a3d78}
+
+/* Analytics remain dense but readable without horizontal scrolling. */
+.mobile-phone .analytics-cards{grid-template-columns:1fr 1fr!important;gap:9px!important;margin-bottom:12px!important}
+.mobile-phone .analytics-cards article{padding:12px;border-radius:14px}
+.mobile-phone .analytics-cards strong{font-size:25px}
+.mobile-phone .analytics-grid,.mobile-phone .exports-grid,.mobile-phone .settings-grid{grid-template-columns:1fr!important;gap:12px!important}
+.mobile-phone .bar-row{grid-template-columns:minmax(72px,105px) minmax(0,1fr) 32px;gap:7px;font-size:11px}
+.mobile-phone .stage-chart .bar-row{grid-template-columns:minmax(105px,130px) minmax(0,1fr) 30px}
+
+.mobile-phone .export-list>div{align-items:flex-start;flex-direction:column;font-size:12px}
+.mobile-phone .export-list small{max-width:none}
+.mobile-phone .export-card form{gap:10px}
+.mobile-phone .presets{grid-template-columns:repeat(3,1fr)}
+
+/* Modal editor on a phone: full-width sheet rather than a desktop modal. */
+.mobile-phone .modal-backdrop{padding:0!important;align-items:flex-end}
+.mobile-phone .preview-modal,.mobile-phone .preview-modal.wide{width:100vw!important;max-width:100vw!important;min-height:75vh;max-height:96vh;margin:4vh 0 0!important;border-radius:22px 22px 0 0!important;padding:14px!important;overflow:auto}
+.mobile-phone .preview-head{position:sticky;top:-14px;background:#f7f9fc;z-index:8;padding:14px 0 10px;margin-bottom:10px}
+.mobile-phone .preview-table-wrap{overflow:auto}
+.mobile-phone .preview-actions{position:sticky;bottom:-14px;background:#f7f9fc;padding:12px 0 calc(12px + env(safe-area-inset-bottom));margin-top:12px}
+
+/* Login also scales cleanly on phones while tablet keeps the existing two-column view. */
+.mobile-phone body.login-body{padding:14px}
+.mobile-phone .login-shell{width:100%;min-height:auto;display:block;border-radius:20px}
+.mobile-phone .brand-panel{display:none}
+.mobile-phone .login-card{margin:0;padding:24px 18px;border:0;box-shadow:none}
+
+@media (prefers-reduced-motion:reduce){.mobile-phone *{scroll-behavior:auto!important;transition:none!important}}

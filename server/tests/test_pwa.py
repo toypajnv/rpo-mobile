@@ -149,7 +149,7 @@ class PwaStaticTests(unittest.TestCase):
             self.assertFalse(data['update_required'])
             self.assertEqual(data['pwa_version'], '1.2.1')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
-            self.assertEqual(data['server_version'], '0.7.2')
+            self.assertEqual(data['server_version'], '0.7.3')
 
 
 if __name__ == '__main__':
