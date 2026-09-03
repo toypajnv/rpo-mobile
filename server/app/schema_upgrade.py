@@ -6,13 +6,20 @@ def ensure_v2_columns() -> None:
     """Idempotent migration for installations created before RPO 2.0."""
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
-    if "permit_records" not in tables or "mobile_events" not in tables:
-        return
-
-    permit_cols = {col["name"] for col in inspector.get_columns("permit_records")}
-    event_cols = {col["name"] for col in inspector.get_columns("mobile_events")}
 
     with engine.begin() as conn:
+        if "operators" in tables:
+            operator_cols = {col["name"] for col in inspector.get_columns("operators")}
+            if "role" not in operator_cols:
+                conn.execute(text("ALTER TABLE operators ADD COLUMN role VARCHAR(24) NOT NULL DEFAULT 'operator'"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_operators_role ON operators (role)"))
+
+        if "permit_records" not in tables or "mobile_events" not in tables:
+            return
+
+        permit_cols = {col["name"] for col in inspector.get_columns("permit_records")}
+        event_cols = {col["name"] for col in inspector.get_columns("mobile_events")}
+
         if "structural_unit" not in permit_cols:
             conn.execute(text("ALTER TABLE permit_records ADD COLUMN structural_unit VARCHAR(80) NOT NULL DEFAULT ''"))
 

@@ -33,7 +33,7 @@ _core.app.version = "0.7.2"
 
 
 def _install_dashboard_assets() -> None:
-    """Serve a fresh dashboard loader and load decision controls directly."""
+    """Serve a fresh dashboard loader, decision controls and role-aware panel UI."""
     template_name = "dashboard.html"
     source_path = _core.BASE_DIR / "templates" / template_name
     source = source_path.read_text(encoding="utf-8")
@@ -46,11 +46,83 @@ def _install_dashboard_assets() -> None:
     if loader not in source:
         raise RuntimeError("Dashboard loader reference was not found")
 
+    # Role marker is rendered from the authenticated server user. Existing users
+    # remain operators by default; managers receive the read-only presentation.
+    source = source.replace(
+        '<body class="app-body">',
+        '<body class="app-body" data-role="{{ operator.role or \'operator\' }}">',
+        1,
+    )
+    source = source.replace(
+        '    <a href="#settings" data-tab-link="settings">⚙ Настройки</a>',
+        '    {% if operator.role != \'manager\' %}<a href="#settings" data-tab-link="settings">⚙ Настройки</a>{% endif %}',
+        1,
+    )
+    source = source.replace(
+        '<span>{{ operator.username }}</span>',
+        '<span>{{ operator.username }}{% if operator.role == \'manager\' %} · Руководитель{% endif %}</span>',
+        1,
+    )
+
+    # Extend the existing admin-only Users tab with user creation and role labels.
+    create_user_marker = "    {% for u in users %}"
+    create_user_block = """    {% if request.query_params.get('user') == 'created' %}<div class=\"alert success\">Пользователь создан.</div>{% elif request.query_params.get('user') == 'exists' %}<div class=\"alert\">Пользователь с таким логином уже существует.</div>{% endif %}
+    <form class=\"password-reset-form manager-create-form\" method=\"post\" action=\"/users/create\">
+      <label>Логин нового пользователя<input type=\"text\" name=\"username\" minlength=\"3\" maxlength=\"80\" autocomplete=\"off\" required placeholder=\"Например: Руководитель_ЦДПН\"></label>
+      <label>Роль<select name=\"role\" required><option value=\"manager\">Руководитель — только просмотр</option><option value=\"operator\">Оператор — рабочий доступ</option></select></label>
+      <label>Пароль<input type=\"password\" name=\"password\" minlength=\"10\" autocomplete=\"new-password\" required placeholder=\"Не менее 10 символов\"></label>
+      <button class=\"primary\" type=\"submit\">Добавить пользователя</button>
+    </form>
+"""
+    if create_user_marker in source and "/users/create" not in source:
+        source = source.replace(create_user_marker, create_user_block + create_user_marker, 1)
+
+    old_role_label = "<span><b>{{ u.username }}</b><small>{% if u.username == operator.username %}Администратор · текущий вход{% else %}Оператор панели{% endif %}</small></span>"
+    new_role_label = "<span><b>{{ u.username }}</b><small>{% if u.username == operator.username %}Администратор · текущий вход{% elif u.role == 'manager' %}Руководитель · только просмотр{% else %}Оператор панели{% endif %}</small></span>"
+    source = source.replace(old_role_label, new_role_label, 1)
+
     decision_tag = (
         f'<script src="/static/dashboard-decisions.js?v={DASHBOARD_ASSET_VERSION}"></script>'
     )
     if decision_tag not in source:
         source = source.replace("</body>", f"{decision_tag}</body>")
+
+    manager_ui = """
+<style id=\"manager-readonly-style\">
+body[data-role=\"manager\"] [data-tab-link=\"settings\"],
+body[data-role=\"manager\"] .approve-button,
+body[data-role=\"manager\"] .allow-button,
+body[data-role=\"manager\"] .deny-button,
+body[data-role=\"manager\"] .danger-button,
+body[data-role=\"manager\"] #tab-exports .export-card,
+body[data-role=\"manager\"] #preview-modal {display:none!important}
+body[data-role=\"manager\"] #tab-exports .exports-grid{grid-template-columns:1fr}
+body[data-role=\"manager\"] .manager-readonly-banner{margin:0 0 14px;padding:12px 16px;border:1px solid #b9c7d8;background:#f5f8fc;border-radius:12px;font-weight:700;color:#344054}
+</style>
+<script id=\"manager-readonly-ui\">
+(() => {
+  if (document.body.dataset.role !== 'manager') return;
+  const allowedTabs = new Set(['home','transmissions','works','analytics','exports']);
+  const enforceAllowedTab = () => {
+    const current = (location.hash || '#home').slice(1);
+    if (!allowedTabs.has(current)) history.replaceState(null, '', `${location.pathname}${location.search}#home`);
+  };
+  enforceAllowedTab();
+  window.addEventListener('hashchange', enforceAllowedTab, true);
+  document.querySelectorAll('[data-open-tab=\"exports\"]').forEach(button => {
+    if (button.textContent.includes('Сформировать')) button.textContent = 'Открыть историю выгрузок';
+  });
+  const banner = document.createElement('div');
+  banner.className = 'manager-readonly-banner';
+  banner.textContent = 'Режим «Руководитель»: только просмотр, фильтрация и аналитика. Согласование, запрет, изменение, удаление и отправка выгрузок отключены.';
+  const filter = document.querySelector('#global-filter');
+  if (filter) filter.insertAdjacentElement('afterend', banner);
+  else document.querySelector('main header')?.insertAdjacentElement('afterend', banner);
+})();
+</script>
+"""
+    if "manager-readonly-ui" not in source:
+        source = source.replace("</body>", f"{manager_ui}</body>")
 
     _core.templates.env.loader = ChoiceLoader([
         DictLoader({template_name: source}),
@@ -66,6 +138,14 @@ from .decision_control import install_decision_control
 install_decision_control(_core)
 decide_mobile_event = _core.decide_mobile_event
 mobile_history = _core.mobile_history
+
+# Manager access is installed after all operator decision routes so the read-only
+# server guard covers allow/deny, legacy approval, exports and future mutations in
+# the operator route families.
+from .manager_access import install_manager_access
+install_manager_access(_core)
+is_manager = _core.is_manager
+create_operator_user = _core.create_operator_user
 
 app = _core.app
 
