@@ -145,11 +145,11 @@ class PwaStaticTests(unittest.TestCase):
             response = client.get('/api/mobile/config?app_version=1.0.1')
             self.assertEqual(response.status_code, 200)
             data = response.json()
-            self.assertEqual(data['latest_app_version'], '2.2.1')
+            self.assertEqual(data['latest_app_version'], '2.2.2')
             self.assertFalse(data['update_required'])
             self.assertEqual(data['pwa_version'], '1.2.1')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
-            self.assertEqual(data['server_version'], '0.7.1')
+            self.assertEqual(data['server_version'], '0.7.2')
 
 
 if __name__ == '__main__':
