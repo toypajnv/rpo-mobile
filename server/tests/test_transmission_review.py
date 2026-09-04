@@ -80,7 +80,7 @@ class TransmissionReviewTests(unittest.TestCase):
                 client_event_id="review-legacy-1",
                 device_id="review-device",
                 worker_name="Горбач ИА",
-                structural_unit="ЦФМиТ",
+                structural_unit="ЦДПН-2",
                 permit_number="09876567",
                 field_key="RI",
                 stage_label="Замена исполнителей работ",
