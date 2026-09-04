@@ -46,7 +46,10 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('/pwa-assets/deny-lock.js?v=20260831-1', sw)
         self.assertIn('/pwa-assets/history-status.js?v=20260901-1', html)
         self.assertIn('/pwa-assets/history-status.js?v=20260901-1', sw)
-        self.assertIn("const CACHE='rpo-pwa-shell-v1.2.1'", sw)
+        self.assertIn("const CACHE='rpo-pwa-shell-v1.2.2'", sw)
+        self.assertIn('Promise.allSettled', sw)
+        self.assertIn('Нет связи с сервером', sw)
+        self.assertIn("caches.match('/app/')", sw)
         self.assertIn('Ошибка передачи на сервер', sync)
         self.assertIn('ПРОВЕДЕНИЕ РАБОТ ЗАПРЕЩЕНО', deny)
         self.assertIn('rpo_pwa_denied_permit_v1', deny)
@@ -110,6 +113,8 @@ class PwaStaticTests(unittest.TestCase):
             page = client.get('/app/')
             self.assertEqual(page.status_code, 200)
             self.assertIn('РПО — работы повышенной опасности', page.text)
+            self.assertIn('pwa-early-service-worker', page.text)
+            self.assertIn('PWA 1.2.2', page.text)
             self.assertIn('no-cache', page.headers.get('cache-control', ''))
 
             sync = client.get('/pwa-assets/sync-status.js')
@@ -147,9 +152,9 @@ class PwaStaticTests(unittest.TestCase):
             data = response.json()
             self.assertEqual(data['latest_app_version'], '2.2.2')
             self.assertFalse(data['update_required'])
-            self.assertEqual(data['pwa_version'], '1.2.1')
+            self.assertEqual(data['pwa_version'], '1.2.2')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
-            self.assertEqual(data['server_version'], '0.7.3')
+            self.assertEqual(data['server_version'], '0.7.4')
 
 
 if __name__ == '__main__':

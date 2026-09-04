@@ -19,9 +19,9 @@ for _name in dir(_core):
 LATEST_MOBILE_VERSION = "2.2.2"
 MIN_SUPPORTED_MOBILE_VERSION = _core.MIN_SUPPORTED_MOBILE_VERSION
 MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.2.2-test/rpo-mobile-2.2.2.apk"
-PWA_VERSION = "1.2.1"
+PWA_VERSION = "1.2.2"
 PWA_URL = _core.PWA_URL
-DASHBOARD_ASSET_VERSION = "20260901-2"
+DASHBOARD_ASSET_VERSION = "20260904-2"
 DASHBOARD_PHONE_VERSION = "20260903-1"
 PWA_ENTRY_HOTFIX_VERSION = "20260901-1"
 PWA_HISTORY_STATUS_VERSION = "20260901-1"
@@ -30,7 +30,7 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.7.3"
+_core.app.version = "0.7.4"
 
 # Keep the historical JSON artifact on the server for rollback/local-import
 # compatibility, but email only the XLSX requested by the operator.
@@ -129,6 +129,8 @@ body[data-role=\"manager\"] [data-tab-link=\"settings\"],
 body[data-role=\"manager\"] .approve-button,
 body[data-role=\"manager\"] .allow-button,
 body[data-role=\"manager\"] .deny-button,
+body[data-role=\"manager\"] .review-approve,
+body[data-role=\"manager\"] .review-reject,
 body[data-role=\"manager\"] .danger-button,
 body[data-role=\"manager\"] #tab-exports .export-card,
 body[data-role=\"manager\"] #preview-modal {display:none!important}
@@ -175,9 +177,14 @@ install_decision_control(_core)
 decide_mobile_event = _core.decide_mobile_event
 mobile_history = _core.mobile_history
 
-# Manager access is installed after all operator decision routes so the read-only
-# server guard covers allow/deny, legacy approval, exports and future mutations in
-# the operator route families.
+# Data review is separate from the safety work prohibition: an operator can reject
+# an erroneous/backdated transmission without globally blocking the permit.
+from .transmission_review import install_transmission_review
+install_transmission_review(_core)
+review_transmission = _core.review_transmission
+
+# Manager access is installed after all operator mutation routes so the read-only
+# server guard covers allow/deny/reject, legacy approval, exports and future writes.
 from .manager_access import install_manager_access
 install_manager_access(_core)
 is_manager = _core.is_manager
@@ -197,13 +204,23 @@ async def inject_pwa_release_hotfixes(request, call_next):
         history_tag = (
             f'<script src="/pwa-assets/history-status.js?v={PWA_HISTORY_STATUS_VERSION}" defer></script>'
         )
+        # Register the service worker immediately, before the worker can add the app
+        # to the Home Screen. This fixes iOS installations that otherwise launched
+        # Safari's black "iPhone is not connected to the Internet" error page.
+        early_sw = """<script id=\"pwa-early-service-worker\">if('serviceWorker' in navigator){navigator.serviceWorker.register('/app/sw.js',{scope:'/app/'}).then(r=>r.update()).catch(()=>{});}</script>"""
+        if "pwa-early-service-worker" not in source:
+            source = source.replace("</head>", f"{early_sw}</head>", 1)
         if permit_tag not in source:
             source = source.replace("</body>", f"  {permit_tag}\n</body>")
         if history_tag not in source:
             source = source.replace("</body>", f"  {history_tag}\n</body>")
         source = source.replace(
-            "PWA 1.2.0 · разрешение и запрет оператором · единая система с Android РПО 2.2.0.",
+            "PWA 1.2.1 · статусы запрета в истории · единая система с Android РПО 2.2.1.",
+            "PWA 1.2.2 · устойчивый запуск на iPhone · единая система с Android РПО 2.2.2.",
+        )
+        source = source.replace(
             "PWA 1.2.1 · статусы запрета в истории · единая система с Android РПО 2.2.2.",
+            "PWA 1.2.2 · устойчивый запуск на iPhone · единая система с Android РПО 2.2.2.",
         )
         return HTMLResponse(
             source,

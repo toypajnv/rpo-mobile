@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and phone dashboard release
+      - name: Wait for VPS autodeploy and field-operations fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -24,37 +24,49 @@ jobs:
             health="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null || true)"
             config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=2.1.0' 2>/dev/null || true)"
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
+            sw="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/sw.js 2>/dev/null || true)"
             dashboard_loader="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard.js 2>/dev/null || true)"
+            review_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-transmission-review.js 2>/dev/null || true)"
+            decisions_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-decisions.js 2>/dev/null || true)"
             mobile_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-mobile.js 2>/dev/null || true)"
             mobile_css="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-mobile.css 2>/dev/null || true)"
             openapi="$(curl -fsS --max-time 8 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
             if [[ "$health" == *'"status":"ok"'* ]] \
-              && [[ "$config" == *'"server_version":"0.7.3"'* ]] \
+              && [[ "$config" == *'"server_version":"0.7.4"'* ]] \
               && [[ "$config" == *'"latest_app_version":"2.2.2"'* ]] \
-              && [[ "$config" == *'"pwa_version":"1.2.1"'* ]] \
-              && [[ "$pwa" == *'PWA 1.2.1'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.2.2"'* ]] \
+              && [[ "$pwa" == *'PWA 1.2.2'* ]] \
+              && [[ "$pwa" == *'pwa-early-service-worker'* ]] \
               && [[ "$pwa" == *'/pwa-assets/deny-lock.js?v=20260831-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/history-status.js?v=20260901-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/sync-status.js?v=20260831-1'* ]] \
-              && [[ "$dashboard_loader" == *'dashboard-decisions.js?v=20260831-1'* ]] \
+              && [[ "$sw" == *'rpo-pwa-shell-v1.2.2'* ]] \
+              && [[ "$sw" == *'Promise.allSettled'* ]] \
+              && [[ "$sw" == *'Нет связи с сервером'* ]] \
+              && [[ "$dashboard_loader" == *'dashboard-transmission-review.js?v=20260904-1'* ]] \
+              && [[ "$review_js" == *'Отклонить'* ]] \
+              && [[ "$review_js" == *'Не рассмотрено'* ]] \
+              && [[ "$review_js" == *'/api/operator/transmissions/${eventId}/review'* ]] \
+              && [[ "$decisions_js" != *'rpo-blocked-banner'* ]] \
               && [[ "$mobile_js" == *'PHONE_SHORT_SIDE_MAX = 540'* ]] \
               && [[ "$mobile_js" == *'data-mobile-label'* ]] \
               && [[ "$mobile_css" == *'.mobile-phone .mobile-tabbar'* ]] \
               && [[ "$mobile_css" == *'.mobile-phone .table-wrap tbody tr'* ]] \
-              && [[ "$openapi" == *'"/users/create"'* ]]; then
-              echo "Production phone-only adaptive dashboard 0.7.3 deployed on attempt $attempt"
+              && [[ "$openapi" == *'"/users/create"'* ]] \
+              && [[ "$openapi" == *'"/api/operator/transmissions/{event_id}/review"'* ]]; then
+              echo "Production server 0.7.4 / PWA 1.2.2 field-operation fixes deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for phone dashboard autodeploy: attempt $attempt/36"
+            echo "Waiting for field-operation fixes autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Phone dashboard release did not become ready in time" >&2
+            echo "Field-operation fixes did not become ready in time" >&2
             exit 1
           fi
 
-      - name: Verify installable PWA decision, history and transmission contract
+      - name: Verify installable PWA offline launch and safety contract
         shell: bash
         run: |
           set -euo pipefail
@@ -63,7 +75,9 @@ jobs:
           grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
           grep -F 'На экран Домой' /tmp/rpo-pwa.html
           grep -F 'permit-suggestion-menu' /tmp/rpo-pwa.html
-          grep -F 'PWA 1.2.1' /tmp/rpo-pwa.html
+          grep -F 'PWA 1.2.2' /tmp/rpo-pwa.html
+          grep -F 'pwa-early-service-worker' /tmp/rpo-pwa.html
+          grep -F "navigator.serviceWorker.register('/app/sw.js',{scope:'/app/'})" /tmp/rpo-pwa.html
           grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/rpo-pwa.html
@@ -83,7 +97,10 @@ jobs:
 
           curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
-          grep -F "rpo-pwa-shell-v1.2.1" /tmp/sw.js
+          grep -F "rpo-pwa-shell-v1.2.2" /tmp/sw.js
+          grep -F 'Promise.allSettled' /tmp/sw.js
+          grep -F "caches.match('/app/')" /tmp/sw.js
+          grep -F 'Нет связи с сервером' /tmp/sw.js
           grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/sw.js
           grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/sw.js
           grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/sw.js
@@ -122,7 +139,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify operator dashboard and phone adaptive assets
+      - name: Verify operator review, safety decisions and phone adaptive assets
         shell: bash
         run: |
           set -euo pipefail
@@ -130,15 +147,27 @@ jobs:
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-core.js -o /tmp/dashboard-core.js
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-ux.js -o /tmp/dashboard-ux.js
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-decisions.js -o /tmp/dashboard-decisions.js
+          curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-transmission-review.js -o /tmp/dashboard-review.js
+          curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-notifications.js -o /tmp/dashboard-notifications.js
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-mobile.js -o /tmp/dashboard-mobile.js
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-mobile.css -o /tmp/dashboard-mobile.css
           grep -F 'dashboard-core.js?v=20260830-1' /tmp/dashboard-loader.js
           grep -F 'dashboard-ux.js?v=20260830-1' /tmp/dashboard-loader.js
-          grep -F 'dashboard-decisions.js?v=20260831-1' /tmp/dashboard-loader.js
+          grep -F 'dashboard-transmission-review.js?v=20260904-1' /tmp/dashboard-loader.js
+          grep -F 'dashboard-notifications.js?v=20260904-1' /tmp/dashboard-loader.js
           grep -F 'Требуют внимания' /tmp/dashboard-ux.js
           grep -F 'data-rpo-decision="denied"' /tmp/dashboard-decisions.js
           grep -F 'ПРОВЕДЕНИЕ ЗАПРЕЩЕНО' /tmp/dashboard-decisions.js
+          grep -F 'Запретить работы' /tmp/dashboard-decisions.js
           grep -F '/decision' /tmp/dashboard-decisions.js
+          if grep -Fq 'rpo-blocked-banner' /tmp/dashboard-decisions.js; then
+            echo 'Global prohibited-works banner is still deployed' >&2
+            exit 1
+          fi
+          grep -F 'Отклонить' /tmp/dashboard-review.js
+          grep -F 'Не рассмотрено' /tmp/dashboard-review.js
+          grep -F '/api/operator/transmissions/${eventId}/review' /tmp/dashboard-review.js
+          grep -F 'Поступили новые данные РПО' /tmp/dashboard-notifications.js
           grep -F 'PHONE_SHORT_SIDE_MAX = 540' /tmp/dashboard-mobile.js
           grep -F "'(pointer: coarse)'" /tmp/dashboard-mobile.js
           grep -F 'mobile-dashboard-header' /tmp/dashboard-mobile.js
@@ -147,7 +176,7 @@ jobs:
           grep -F '.mobile-phone .table-wrap tbody tr' /tmp/dashboard-mobile.css
           test -s /tmp/dashboard-core.js
 
-      - name: Verify mobile, operator and manager API contract is deployed
+      - name: Verify mobile, operator review and manager API contract is deployed
         shell: bash
         run: |
           set -euo pipefail
@@ -164,6 +193,7 @@ jobs:
               '/api/mobile/config',
               '/api/operator/events/{event_id}/approve',
               '/api/operator/events/{event_id}/decision',
+              '/api/operator/transmissions/{event_id}/review',
               '/api/operator/analytics',
               '/users/create',
           ]
@@ -171,10 +201,12 @@ jobs:
               assert route in paths, f'Missing deployed API route: {route}'
               print(f'Deployed API route confirmed: {route}')
           decision = paths['/api/operator/events/{event_id}/decision']['post']
+          review = paths['/api/operator/transmissions/{event_id}/review']['post']
           assert 'requestBody' in decision
+          assert 'requestBody' in review
           manager_create = paths['/users/create']['post']
           assert 'requestBody' in manager_create
-          print('Operator decision and manager user creation contracts confirmed')
+          print('Operator decision, transmission review and manager user creation contracts confirmed')
           PY
 
       - name: Verify rollback compatibility status
@@ -190,9 +222,9 @@ jobs:
           assert cfg['latest_app_version']=='2.2.2'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          assert cfg['pwa_version']=='1.2.1'
+          assert cfg['pwa_version']=='1.2.2'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
-          assert cfg['server_version']=='0.7.3'
+          assert cfg['server_version']=='0.7.4'
           assert cfg['minimum_supported_version']=='1.0.1'
-          print('Older APKs remain supported; phone dashboard release contract confirmed')
+          print('Older APKs remain supported; field-operation fixes contract confirmed')
           PY

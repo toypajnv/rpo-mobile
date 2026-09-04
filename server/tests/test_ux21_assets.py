@@ -10,9 +10,9 @@ APP_DIR = SERVER_DIR / "app"
 
 class Ux21AssetsTest(unittest.TestCase):
     def test_public_versions_are_updated_without_breaking_legacy_support(self):
-        self.assertEqual(main.app.version, "0.7.3")
+        self.assertEqual(main.app.version, "0.7.4")
         self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.2")
-        self.assertEqual(main.PWA_VERSION, "1.2.1")
+        self.assertEqual(main.PWA_VERSION, "1.2.2")
         self.assertEqual(main.MIN_SUPPORTED_MOBILE_VERSION, "1.0.1")
         self.assertIn("v2.2.2-test/rpo-mobile-2.2.2.apk", main.MOBILE_APK_URL)
 
@@ -21,9 +21,10 @@ class Ux21AssetsTest(unittest.TestCase):
         core = (APP_DIR / "static" / "dashboard-core.js").read_text(encoding="utf-8")
         ux = (APP_DIR / "static" / "dashboard-ux.js").read_text(encoding="utf-8")
         decisions = (APP_DIR / "static" / "dashboard-decisions.js").read_text(encoding="utf-8")
+        review = (APP_DIR / "static" / "dashboard-transmission-review.js").read_text(encoding="utf-8")
         self.assertIn("dashboard-core.js?v=20260830-1", loader)
         self.assertIn("dashboard-ux.js?v=20260830-1", loader)
-        self.assertIn("dashboard-decisions.js?v=20260831-1", loader)
+        self.assertIn("dashboard-transmission-review.js?v=20260904-1", loader)
         self.assertIn("refreshWorks", core)
         self.assertIn("Требуют внимания", ux)
         self.assertIn("ux-drawer", ux)
@@ -31,8 +32,12 @@ class Ux21AssetsTest(unittest.TestCase):
         self.assertIn('/decision', decisions)
         self.assertIn('ПРОВЕДЕНИЕ ЗАПРЕЩЕНО', decisions)
         self.assertIn('Причина запрета', decisions)
+        self.assertNotIn('rpo-blocked-banner', decisions)
+        self.assertIn('Отклонить', review)
+        self.assertIn('/api/operator/transmissions/${eventId}/review', review)
+        self.assertIn('Не рассмотрено', review)
 
-    def test_pwa_ux_120_assets_are_installable_cached_and_fail_safe(self):
+    def test_pwa_ux_122_assets_are_installable_cached_and_fail_safe(self):
         index = (APP_DIR / "pwa" / "index.html").read_text(encoding="utf-8")
         sw = (APP_DIR / "pwa" / "sw.js").read_text(encoding="utf-8")
         ux = (APP_DIR / "pwa" / "ux.js").read_text(encoding="utf-8")
@@ -43,7 +48,9 @@ class Ux21AssetsTest(unittest.TestCase):
         self.assertIn("/pwa-assets/ux.js?v=20260830-2", index)
         self.assertIn("/pwa-assets/sync-status.js?v=20260831-1", index)
         self.assertIn("/pwa-assets/deny-lock.js?v=20260831-1", index)
-        self.assertIn("rpo-pwa-shell-v1.2.1", sw)
+        self.assertIn("rpo-pwa-shell-v1.2.2", sw)
+        self.assertIn("Promise.allSettled", sw)
+        self.assertIn("Нет связи с сервером", sw)
         self.assertIn("sync-status.js?v=20260831-1", sw)
         self.assertIn("deny-lock.js?v=20260831-1", sw)
         self.assertIn("Следующее действие", ux)
