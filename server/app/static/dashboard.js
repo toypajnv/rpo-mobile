@@ -15,5 +15,6 @@
   // existing deployment check during this narrowly scoped operator UI hotfix.
   load('/static/dashboard-core.js?v=20260830-1')
     .then(() => load('/static/dashboard-ux.js?v=20260830-1'))
+    .then(() => load('/static/dashboard-notifications.js?v=20260904-1'))
     .catch((error) => console.error('RPO dashboard loader', error));
 })();
