@@ -15,6 +15,13 @@
 
   let timer = null;
 
+  const fmt = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  };
+
   function filterQuery() {
     const q = new URLSearchParams({limit: '300'});
     const search = document.querySelector('#global-search')?.value?.trim();
@@ -44,10 +51,27 @@
     return `<div class="review-controls"><button type="button" class="review-approve" data-review-decision="approved" data-review-event="${Number(item.id)}">Разрешить</button><button type="button" class="review-reject" data-review-decision="rejected" data-review-event="${Number(item.id)}">Отклонить</button></div>`;
   }
 
+  function apiKey(item) {
+    return [fmt(item.received_at), item.worker_name || '', item.permit_number || '', item.field_key || '', item.field_value || ''].join('|');
+  }
+
+  function rowKey(row) {
+    const cells = row.querySelectorAll('td');
+    const key = row.querySelector('.stage-code')?.textContent?.trim() || '';
+    return [cells[0]?.textContent?.trim() || '', cells[2]?.textContent?.trim() || '', cells[3]?.textContent?.trim() || '', key, cells[5]?.textContent?.trim() || ''].join('|');
+  }
+
   function annotate(rows) {
-    const domRows = Array.from(document.querySelectorAll('#transmissions-body tr'));
-    domRows.forEach((row, index) => {
-      const item = rows[index];
+    const byKey = new Map();
+    rows.forEach(item => {
+      const key = apiKey(item);
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(item);
+    });
+
+    document.querySelectorAll('#transmissions-body tr').forEach(row => {
+      const bucket = byKey.get(rowKey(row));
+      const item = bucket?.shift();
       if (!item) return;
       row.dataset.eventId = String(item.id || '');
       row.classList.toggle('rpo-rejected', item.approval_status === 'rejected');
