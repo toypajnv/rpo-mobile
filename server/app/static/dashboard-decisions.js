@@ -9,8 +9,6 @@
     .badge.denied{background:#fee4e2!important;color:#b42318!important;border:1px solid #f97066!important}
     #works-body tr.rpo-blocked>td{background:#fff7f6}.blocked-permit-note{display:block;margin-top:5px;color:#b42318;font-weight:800;max-width:360px}
     .stage-detail-line.rpo-stage-denied{border-left:4px solid #d92d20;background:#fff4f2;padding-left:10px}
-    #rpo-blocked-banner{display:none;margin:0 0 14px;padding:13px 16px;border:1px solid #f97066;background:#fff1f0;color:#912018;border-radius:12px;font-weight:800}
-    #rpo-blocked-banner.show{display:block}
   `;
   document.head.appendChild(style);
 
@@ -27,23 +25,13 @@
     return q;
   }
 
-  function ensureBanner() {
-    let banner = document.querySelector('#rpo-blocked-banner');
-    if (banner) return banner;
-    banner = document.createElement('div');
-    banner.id = 'rpo-blocked-banner';
-    const host = document.querySelector('#global-filter') || document.querySelector('main header');
-    host?.insertAdjacentElement('afterend', banner);
-    return banner;
-  }
-
   function actionHtml(item) {
     if (!item?.approval_required || !Number(item.event_id)) return '—';
     if (item.approval_status === 'denied') {
       return `<div class="decision-controls"><button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${Number(item.event_id)}">Снять запрет</button></div>`;
     }
     const allow = item.approval_status === 'approved' ? '' : `<button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${Number(item.event_id)}">Разрешить</button>`;
-    return `<div class="decision-controls">${allow}<button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${Number(item.event_id)}">Запретить</button></div>`;
+    return `<div class="decision-controls">${allow}<button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${Number(item.event_id)}">Запретить работы</button></div>`;
   }
 
   function setBadge(container, item) {
@@ -68,7 +56,6 @@
 
   function annotateWorks(records) {
     const byPermit = new Map(records.map(record => [String(record.permit_number || '').trim(), record]));
-    let blockedCount = 0;
     document.querySelectorAll('#works-body tr').forEach(row => {
       const cells = row.querySelectorAll('td');
       const permit = cells[2]?.textContent?.trim() || '';
@@ -77,7 +64,6 @@
       const approval = record.approval || {};
       const blocked = approval.status === 'denied';
       row.classList.toggle('rpo-blocked', blocked);
-      if (blocked) blockedCount++;
 
       if (cells[5]) {
         let badge = cells[5].querySelector('.badge');
@@ -116,46 +102,18 @@
         }
       });
     });
-    const banner = ensureBanner();
-    if (banner) {
-      banner.classList.toggle('show', blockedCount > 0);
-      banner.innerHTML = blockedCount > 0 ? `⛔ Запрещено проведение работ по НД: <b>${blockedCount}</b>. Откройте «Работы», чтобы увидеть этап и причину запрета.` : '';
-    }
-  }
-
-  function annotateTransmissions(records) {
-    const current = new Map();
-    records.forEach(record => (record.stage_items || []).forEach(item => current.set(`${record.permit_number}|${item.key}`, item)));
-    const seen = new Set();
-    document.querySelectorAll('#transmissions-body tr').forEach(row => {
-      const cells = row.querySelectorAll('td');
-      const permit = cells[3]?.textContent?.trim() || '';
-      const key = row.querySelector('.stage-code')?.textContent?.trim() || '';
-      const mapKey = `${permit}|${key}`;
-      if (seen.has(mapKey)) return;
-      seen.add(mapKey);
-      const item = current.get(mapKey);
-      if (!item) return;
-      if (cells[7]) setBadge(cells[7], item);
-      if (cells[8]) cells[8].innerHTML = actionHtml(item);
-      row.classList.toggle('rpo-blocked', item.approval_status === 'denied');
-    });
   }
 
   function annotateSnapshot() {
     if (!snapshot.length) return;
     annotateWorks(snapshot);
-    annotateTransmissions(snapshot);
   }
 
   function bindTableObservers() {
     if (tableObserversBound) return;
     tableObserversBound = true;
-    ['#works-body', '#transmissions-body'].forEach(selector => {
-      const body = document.querySelector(selector);
-      if (!body) return;
-      new MutationObserver(() => queueMicrotask(annotateSnapshot)).observe(body, {childList:true});
-    });
+    const body = document.querySelector('#works-body');
+    if (body) new MutationObserver(() => queueMicrotask(annotateSnapshot)).observe(body, {childList:true});
   }
 
   async function refreshDecisions() {
