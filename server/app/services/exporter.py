@@ -24,8 +24,14 @@ def record_data(record: PermitRecord) -> dict:
         return {}
 
 
+def export_stage_header(key: str) -> str:
+    """Use a clear business label for the permit-extension date in XLSX."""
+    label = "Продление работ на" if key == "BE" else STAGES[key]["label"]
+    return f"{key} — {label}"
+
+
 def build_export(records: list[PermitRecord], export_dir: str, batch_id: int) -> tuple[Path, Path]:
-    """Build one export row per permit (plus nested JSON for local import)."""
+    """Build one export row per permit (plus nested JSON retained on the server)."""
     out = Path(export_dir)
     out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -37,8 +43,7 @@ def build_export(records: list[PermitRecord], export_dir: str, batch_id: int) ->
     wb = Workbook()
     ws = wb.active
     ws.title = "Наряды-допуски"
-    # Keep the existing XLSX contract unchanged so the local importer is not broken.
-    headers = ["НД", "Работник"] + [f"{key} — {STAGES[key]['label']}" for key in stage_keys] + ["Комментарии", "Обновлено", "ID записи"]
+    headers = ["НД", "Работник"] + [export_stage_header(key) for key in stage_keys] + ["Комментарии", "Обновлено", "ID записи"]
     ws.append(headers)
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")

@@ -32,6 +32,27 @@ _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
 _core.app.version = "0.7.3"
 
+# Keep the historical JSON artifact on the server for rollback/local-import
+# compatibility, but email only the XLSX requested by the operator.
+_original_send_export = _core.send_export
+
+
+def _send_xlsx_export_only(recipient, subject, body, attachments, idempotency_key=None):
+    xlsx_attachments = [path for path in attachments if path.suffix.lower() == ".xlsx"]
+    if not xlsx_attachments:
+        raise RuntimeError("В выгрузке отсутствует файл Excel")
+    return _original_send_export(
+        recipient,
+        subject,
+        body,
+        xlsx_attachments,
+        idempotency_key=idempotency_key,
+    )
+
+
+_core.send_export = _send_xlsx_export_only
+send_export = _core.send_export
+
 
 def _install_dashboard_assets() -> None:
     """Serve fresh dashboard controls, roles and a phone-only adaptive interface."""
