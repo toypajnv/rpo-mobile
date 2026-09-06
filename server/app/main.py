@@ -204,12 +204,21 @@ async def inject_pwa_release_hotfixes(request, call_next):
         history_tag = (
             f'<script src="/pwa-assets/history-status.js?v={PWA_HISTORY_STATUS_VERSION}" defer></script>'
         )
+        # Keep the bottom navigation fixed, but reserve enough scrollable space for
+        # it and the iPhone Home Indicator. Four tabs must stay on one row.
+        safe_area_style = """<style id=\"pwa-bottom-safe-area\">
+.bottom-nav{grid-template-columns:repeat(4,minmax(0,1fr));padding-bottom:calc(7px + env(safe-area-inset-bottom, 0px))}
+.main-content{padding-bottom:calc(112px + env(safe-area-inset-bottom, 0px))}
+#tab-instruction .instruction-shell{padding-bottom:24px}
+</style>"""
         # Register the service worker immediately, before the worker can add the app
         # to the Home Screen. This fixes iOS installations that otherwise launched
         # Safari's black "iPhone is not connected to the Internet" error page.
         early_sw = """<script id=\"pwa-early-service-worker\">if('serviceWorker' in navigator){navigator.serviceWorker.register('/app/sw.js',{scope:'/app/'}).then(r=>r.update()).catch(()=>{});}</script>"""
         if "pwa-early-service-worker" not in source:
             source = source.replace("</head>", f"{early_sw}</head>", 1)
+        if "pwa-bottom-safe-area" not in source:
+            source = source.replace("</head>", f"{safe_area_style}</head>", 1)
         if permit_tag not in source:
             source = source.replace("</body>", f"  {permit_tag}\n</body>")
         if history_tag not in source:
