@@ -14,6 +14,7 @@
   <link rel="icon" sizes="192x192" href="/app/icon-192.png">
   <link rel="stylesheet" href="/pwa-assets/app.css?v=20260829-2">
   <link rel="stylesheet" href="/pwa-assets/ux.css?v=20260830-1">
+  <link rel="stylesheet" href="/pwa-assets/instruction-assistant.css?v=20260906-1">
 </head>
 <body>
   <div class="app-shell">
@@ -94,6 +95,8 @@
         </section>
       </section>
 
+      <section id="tab-instruction" class="screen" data-screen="instruction"><div id="instruction-root"></div></section>
+
       <section id="tab-history" class="screen" data-screen="history">
         <div class="page-heading"><h1>История</h1><p>Наряды-допуски этого устройства с поиском и статусами</p></div>
         <div id="history-list" class="history-list"></div>
@@ -110,12 +113,13 @@
         <section class="card help-card"><h2>Решение оператора</h2><p>Оператор может не только разрешить этап, но и запретить проведение работ. Запрет по одному этапу блокирует весь выбранный НД: приложение становится красным и не позволяет продолжать передачу этапов до снятия запрета оператором.</p></section>
         <section class="card help-card"><h2>Статус передачи</h2><p>«Сохранено на iPhone» означает, что запись ещё ожидает отправки. «Передано» показывается только после подтверждения сервера. Если сервер отклонил запись, приложение покажет этап и конкретную причину ошибки и предложит исправить данные.</p></section>
         <section class="card help-card"><h2>Работа без интернета</h2><p>Если сеть пропала, заполненные события сохраняются на устройстве. Полученный с сервера запрет также сохраняется локально и остаётся активным до следующей успешной проверки статуса.</p></section>
-        <section class="card help-card"><h2>Версия</h2><p>PWA 1.2.1 · статусы запрета в истории · единая система с Android РПО 2.2.1.</p></section>
+        <section class="card help-card"><h2>Версия</h2><p>PWA 1.3.0 · помощник при инструктаже · единая система с Android РПО 2.3.0.</p></section>
       </section>
     </main>
 
     <nav class="bottom-nav" aria-label="Основная навигация">
       <button type="button" class="nav-item active" data-tab="form"><span>▣</span><b>Работа</b></button>
+      <button type="button" class="nav-item" data-tab="instruction"><span>✓</span><b>Инструктаж</b></button>
       <button type="button" class="nav-item" data-tab="history"><span>◷</span><b>История</b></button>
       <button type="button" class="nav-item" data-tab="help"><span>?</span><b>Справка</b></button>
     </nav>
@@ -125,5 +129,6 @@
   <script src="/pwa-assets/ux.js?v=20260830-2" defer></script>
   <script src="/pwa-assets/deny-lock.js?v=20260831-1" defer></script>
   <script src="/pwa-assets/history-status.js?v=20260901-1" defer></script>
+  <script src="/pwa-assets/instruction-assistant.js?v=20260906-1" defer></script>
 </body>
 </html>

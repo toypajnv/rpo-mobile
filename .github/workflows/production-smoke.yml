@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and field-operations fixes
+      - name: Wait for VPS autodeploy and instruction assistant release
         shell: bash
         run: |
           set -euo pipefail
@@ -25,6 +25,8 @@ jobs:
             config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=2.1.0' 2>/dev/null || true)"
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
             sw="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/sw.js 2>/dev/null || true)"
+            assistant_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/pwa-assets/instruction-assistant.js 2>/dev/null || true)"
+            assistant_css="$(curl -fsS --max-time 8 https://rpo-mng.ru/pwa-assets/instruction-assistant.css 2>/dev/null || true)"
             dashboard_loader="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard.js 2>/dev/null || true)"
             review_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-transmission-review.js 2>/dev/null || true)"
             decisions_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-decisions.js 2>/dev/null || true)"
@@ -32,17 +34,24 @@ jobs:
             mobile_css="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-mobile.css 2>/dev/null || true)"
             openapi="$(curl -fsS --max-time 8 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
             if [[ "$health" == *'"status":"ok"'* ]] \
-              && [[ "$config" == *'"server_version":"0.7.4"'* ]] \
-              && [[ "$config" == *'"latest_app_version":"2.2.2"'* ]] \
-              && [[ "$config" == *'"pwa_version":"1.2.2"'* ]] \
-              && [[ "$pwa" == *'PWA 1.2.2'* ]] \
+              && [[ "$config" == *'"server_version":"0.8.0"'* ]] \
+              && [[ "$config" == *'"latest_app_version":"2.3.0"'* ]] \
+              && [[ "$config" == *'"pwa_version":"1.3.0"'* ]] \
+              && [[ "$pwa" == *'PWA 1.3.0'* ]] \
               && [[ "$pwa" == *'pwa-early-service-worker'* ]] \
               && [[ "$pwa" == *'/pwa-assets/deny-lock.js?v=20260831-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/history-status.js?v=20260901-1'* ]] \
               && [[ "$pwa" == *'/pwa-assets/sync-status.js?v=20260831-1'* ]] \
-              && [[ "$sw" == *'rpo-pwa-shell-v1.2.2'* ]] \
+              && [[ "$pwa" == *'/pwa-assets/instruction-assistant.css?v=20260906-1'* ]] \
+              && [[ "$pwa" == *'/pwa-assets/instruction-assistant.js?v=20260906-1'* ]] \
+              && [[ "$pwa" == *'data-tab="instruction"'* ]] \
+              && [[ "$sw" == *'rpo-pwa-shell-v1.3.0'* ]] \
+              && [[ "$sw" == *'instruction-assistant.js?v=20260906-1'* ]] \
               && [[ "$sw" == *'Promise.allSettled'* ]] \
               && [[ "$sw" == *'Нет связи с сервером'* ]] \
+              && [[ "$assistant_js" == *'Помощник при инструктаже'* ]] \
+              && [[ "$assistant_js" == *'Когда нужен повторный инструктаж'* ]] \
+              && [[ "$assistant_css" == *'.instruction-risk-grid'* ]] \
               && [[ "$dashboard_loader" == *'dashboard-transmission-review.js?v=20260904-1'* ]] \
               && [[ "$review_js" == *'Отклонить'* ]] \
               && [[ "$review_js" == *'Не рассмотрено'* ]] \
@@ -54,19 +63,19 @@ jobs:
               && [[ "$mobile_css" == *'.mobile-phone .table-wrap tbody tr'* ]] \
               && [[ "$openapi" == *'"/users/create"'* ]] \
               && [[ "$openapi" == *'"/api/operator/transmissions/{event_id}/review"'* ]]; then
-              echo "Production server 0.7.4 / PWA 1.2.2 field-operation fixes deployed on attempt $attempt"
+              echo "Production server 0.8.0 / PWA 1.3.0 instruction assistant deployed on attempt $attempt"
               ok=1
               break
             fi
-            echo "Waiting for field-operation fixes autodeploy: attempt $attempt/36"
+            echo "Waiting for instruction assistant autodeploy: attempt $attempt/36"
             sleep 10
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Field-operation fixes did not become ready in time" >&2
+            echo "Instruction assistant release did not become ready in time" >&2
             exit 1
           fi
 
-      - name: Verify installable PWA offline launch and safety contract
+      - name: Verify installable PWA assistant, offline launch and safety contract
         shell: bash
         run: |
           set -euo pipefail
@@ -75,12 +84,16 @@ jobs:
           grep -F '/app/manifest.webmanifest' /tmp/rpo-pwa.html
           grep -F 'На экран Домой' /tmp/rpo-pwa.html
           grep -F 'permit-suggestion-menu' /tmp/rpo-pwa.html
-          grep -F 'PWA 1.2.2' /tmp/rpo-pwa.html
+          grep -F 'PWA 1.3.0' /tmp/rpo-pwa.html
           grep -F 'pwa-early-service-worker' /tmp/rpo-pwa.html
           grep -F "navigator.serviceWorker.register('/app/sw.js',{scope:'/app/'})" /tmp/rpo-pwa.html
           grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/rpo-pwa.html
           grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/rpo-pwa.html
+          grep -F '/pwa-assets/instruction-assistant.css?v=20260906-1' /tmp/rpo-pwa.html
+          grep -F '/pwa-assets/instruction-assistant.js?v=20260906-1' /tmp/rpo-pwa.html
+          grep -F 'data-screen="instruction"' /tmp/rpo-pwa.html
+          grep -F 'data-tab="instruction"' /tmp/rpo-pwa.html
           grep -F 'Если оператор запретит проведение работ по любому этапу' /tmp/rpo-pwa.html
 
           curl -fsS --max-time 10 https://rpo-mng.ru/app/manifest.webmanifest -o /tmp/rpo-manifest.json
@@ -97,13 +110,25 @@ jobs:
 
           curl -fsS -D /tmp/sw-headers.txt --max-time 10 https://rpo-mng.ru/app/sw.js -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
-          grep -F "rpo-pwa-shell-v1.2.2" /tmp/sw.js
+          grep -F "rpo-pwa-shell-v1.3.0" /tmp/sw.js
           grep -F 'Promise.allSettled' /tmp/sw.js
           grep -F "caches.match('/app/')" /tmp/sw.js
           grep -F 'Нет связи с сервером' /tmp/sw.js
           grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/sw.js
           grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/sw.js
           grep -F '/pwa-assets/history-status.js?v=20260901-1' /tmp/sw.js
+          grep -F '/pwa-assets/instruction-assistant.css?v=20260906-1' /tmp/sw.js
+          grep -F '/pwa-assets/instruction-assistant.js?v=20260906-1' /tmp/sw.js
+
+          curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/instruction-assistant.js -o /tmp/pwa-instruction-assistant.js
+          grep -F 'Помощник при инструктаже' /tmp/pwa-instruction-assistant.js
+          grep -F 'РОИ — модель проведения инструктажа' /tmp/pwa-instruction-assistant.js
+          grep -F 'Обсудите характер предстоящей работы' /tmp/pwa-instruction-assistant.js
+          grep -F 'Определите основные опасности' /tmp/pwa-instruction-assistant.js
+          grep -F 'Обсудите меры безопасности' /tmp/pwa-instruction-assistant.js
+          grep -F 'Обсудите действия в нештатной ситуации' /tmp/pwa-instruction-assistant.js
+          grep -F 'Когда нужен повторный инструктаж' /tmp/pwa-instruction-assistant.js
+          grep -F 'Мини-база знаний' /tmp/pwa-instruction-assistant.js
 
           curl -fsS --max-time 10 https://rpo-mng.ru/pwa-assets/sync-status.js -o /tmp/pwa-sync-status.js
           grep -F "const SAVED_KEY = 'rpo_pwa_saved_v1'" /tmp/pwa-sync-status.js
@@ -219,12 +244,12 @@ jobs:
           from pathlib import Path
           cfg=json.loads(Path('/tmp/mobile-config.json').read_text())
           assert cfg['status']=='ok'
-          assert cfg['latest_app_version']=='2.2.2'
+          assert cfg['latest_app_version']=='2.3.0'
           assert cfg['update_required'] is False
           assert cfg['update_available'] is True
-          assert cfg['pwa_version']=='1.2.2'
+          assert cfg['pwa_version']=='1.3.0'
           assert cfg['pwa_url']=='https://rpo-mng.ru/app/'
-          assert cfg['server_version']=='0.7.4'
+          assert cfg['server_version']=='0.8.0'
           assert cfg['minimum_supported_version']=='1.0.1'
-          print('Older APKs remain supported; field-operation fixes contract confirmed')
+          print('Older APKs remain supported; instruction assistant release contract confirmed')
           PY

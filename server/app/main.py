@@ -16,10 +16,10 @@ for _name in dir(_core):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_core, _name)
 
-LATEST_MOBILE_VERSION = "2.2.2"
+LATEST_MOBILE_VERSION = "2.3.0"
 MIN_SUPPORTED_MOBILE_VERSION = _core.MIN_SUPPORTED_MOBILE_VERSION
-MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.2.2-test/rpo-mobile-2.2.2.apk"
-PWA_VERSION = "1.2.2"
+MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.3.0-test/rpo-mobile-2.3.0.apk"
+PWA_VERSION = "1.3.0"
 PWA_URL = _core.PWA_URL
 DASHBOARD_ASSET_VERSION = "20260904-2"
 DASHBOARD_PHONE_VERSION = "20260903-1"
@@ -30,7 +30,7 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.7.4"
+_core.app.version = "0.8.0"
 
 # Keep the historical JSON artifact on the server for rollback/local-import
 # compatibility, but email only the XLSX requested by the operator.
