@@ -93,7 +93,7 @@ private val UxMuted = Color(0xFF718096)
 private val UxDateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 private val UxTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-private enum class UxTab { WORK, HISTORY, HELP }
+private enum class UxTab { WORK, INSTRUCTION, HISTORY, HELP }
 private enum class HistoryFilter { ALL, PENDING, APPROVED, DENIED }
 
 private fun uxFingerprint(s: FormState): String = listOf(
@@ -143,6 +143,12 @@ fun RpoUxApp(vm: RpoViewModel = viewModel()) {
                             label = { Text("Работа") },
                         )
                         NavigationBarItem(
+                            selected = tab == UxTab.INSTRUCTION,
+                            onClick = { tab = UxTab.INSTRUCTION },
+                            icon = { Icon(Icons.Default.CheckCircle, "Инструктаж") },
+                            label = { Text("Инструктаж") },
+                        )
+                        NavigationBarItem(
                             selected = tab == UxTab.HISTORY,
                             onClick = { tab = UxTab.HISTORY },
                             icon = { Icon(Icons.Default.History, "История") },
@@ -160,6 +166,7 @@ fun RpoUxApp(vm: RpoViewModel = viewModel()) {
         ) { padding ->
             when (tab) {
                 UxTab.WORK -> UxWorkScreen(state, memories, vm, Modifier.padding(padding))
+                UxTab.INSTRUCTION -> InstructionAssistantScreen(state, Modifier.padding(padding))
                 UxTab.HISTORY -> UxHistoryScreen(history, Modifier.padding(padding))
                 UxTab.HELP -> UxHelpScreen(Modifier.padding(padding))
             }
@@ -994,7 +1001,7 @@ private fun UxHelpScreen(modifier: Modifier = Modifier) {
         UxHelpCard("Передавайте только новое", "Если начало этапа уже передано, при последующем заполнении окончания приложение не отправляет начало повторно.")
         UxHelpCard("Дождитесь разрешения", "Для всех этапов, кроме остановки работ, после передачи дождитесь зелёного статуса «Работы можно проводить».")
         UxHelpCard("Без интернета", "Данные сохраняются на устройстве. В шапке появится счётчик очереди, а отправка возобновится автоматически после появления связи.")
-        UxHelpCard("Версия", "РПО Mobile 2.1 · новый интерфейс. Предыдущий интерфейс и APK 2.0.1 сохранены для быстрого отката.")
+        UxHelpCard("Версия", "РПО Mobile 2.3.0 · добавлен помощник при риск-ориентированном инструктаже и мини-база знаний.")
     }
 }
 

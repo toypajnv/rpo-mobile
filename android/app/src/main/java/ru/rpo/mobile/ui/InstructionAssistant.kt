@@ -195,10 +195,11 @@ private val knowledgeCards = listOf(
 
 @Composable
 fun InstructionAssistantScreen(state: FormState, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     var view by remember { mutableStateOf(AssistantView.HOME) }
     var step by remember { mutableStateOf(1) }
     var selectedRiskIds by remember { mutableStateOf(setOf<String>()) }
-    var completedAt by remember { mutableStateOf(loadCompletion(LocalContext.current, state.permitNumber)) }
+    var completedAt by remember(state.permitNumber) { mutableStateOf(loadCompletion(context, state.permitNumber)) }
 
     when (view) {
         AssistantView.HOME -> AssistantHome(
@@ -219,7 +220,7 @@ fun InstructionAssistantScreen(state: FormState, modifier: Modifier = Modifier) 
             onNext = { if (step < 5) step += 1 },
             onComplete = {
                 val value = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))
-                saveCompletion(LocalContext.current, state.permitNumber, value)
+                saveCompletion(context, state.permitNumber, value)
                 completedAt = value
                 view = AssistantView.HOME
             },

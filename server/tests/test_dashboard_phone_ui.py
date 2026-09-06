@@ -28,9 +28,9 @@ class DashboardPhoneUiTests(unittest.TestCase):
         self.assertIn('data-tab-link="works"', source)
 
     def test_server_release_advances_for_mobile_dashboard(self) -> None:
-        self.assertEqual(main._core.app.version, "0.7.4")
-        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.2")
-        self.assertEqual(main.PWA_VERSION, "1.2.2")
+        self.assertEqual(main._core.app.version, "0.8.0")
+        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.3.0")
+        self.assertEqual(main.PWA_VERSION, "1.3.0")
 
 
 if __name__ == "__main__":

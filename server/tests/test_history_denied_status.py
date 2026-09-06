@@ -58,8 +58,8 @@ class HistoryDeniedStatusTests(unittest.TestCase):
             self.assertEqual(allowed[0]["approval_status"], "approved")
 
     def test_ios_and_android_ui_contracts_render_denied_status(self) -> None:
-        self.assertEqual(main.PWA_VERSION, "1.2.2")
-        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.2.2")
+        self.assertEqual(main.PWA_VERSION, "1.3.0")
+        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.3.0")
         pwa = (main._core.PWA_DIR / "history-status.js").read_text(encoding="utf-8")
         sw = (main._core.PWA_DIR / "sw.js").read_text(encoding="utf-8")
         android = (
@@ -70,11 +70,11 @@ class HistoryDeniedStatusTests(unittest.TestCase):
 
         self.assertIn("Проведение запрещено", pwa)
         self.assertIn("history-denied", pwa)
-        self.assertIn("rpo-pwa-shell-v1.2.2", sw)
+        self.assertIn("rpo-pwa-shell-v1.3.0", sw)
         self.assertIn("history-status.js?v=20260901-1", sw)
         self.assertIn("HistoryFilter.DENIED", android)
         self.assertIn('"denied" -> "Проведение запрещено"', android)
-        self.assertIn('versionName = "2.2.2"', gradle)
+        self.assertIn('versionName = "2.3.0"', gradle)
 
 
 if __name__ == "__main__":
