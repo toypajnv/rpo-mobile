@@ -5,10 +5,12 @@
   style.textContent = `
     .deny-button{border:1px solid #d92d20;background:#fff1f0;color:#b42318;border-radius:9px;padding:7px 10px;font-weight:800;cursor:pointer}
     .deny-button:hover{background:#fee4e2}.allow-button{border:1px solid #17a34a;background:#ecfdf3;color:#087a34;border-radius:9px;padding:7px 10px;font-weight:800;cursor:pointer}
-    .decision-controls{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.decision-controls button:disabled{opacity:.55;cursor:wait}
+    .decision-controls,.permit-decision-controls,.transmission-deny-control{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .decision-controls button:disabled,.permit-decision-controls button:disabled,.transmission-deny-control button:disabled{opacity:.55;cursor:wait}
     .badge.denied{background:#fee4e2!important;color:#b42318!important;border:1px solid #f97066!important}
     #works-body tr.rpo-blocked>td{background:#fff7f6}.blocked-permit-note{display:block;margin-top:5px;color:#b42318;font-weight:800;max-width:360px}
     .stage-detail-line.rpo-stage-denied{border-left:4px solid #d92d20;background:#fff4f2;padding-left:10px}
+    #works-body td:last-child .permit-decision-controls{margin-bottom:6px}
   `;
   document.head.appendChild(style);
 
@@ -54,6 +56,44 @@
     }
   }
 
+  function decisionItemForPermit(record) {
+    const items = Array.isArray(record?.stage_items) ? record.stage_items : [];
+    const approval = record?.approval || {};
+    if (approval.status === 'denied' && approval.denied_field_key) {
+      const denied = items.find(item => String(item.key) === String(approval.denied_field_key) && Number(item.event_id));
+      if (denied) return denied;
+    }
+    return [...items].reverse().find(item =>
+      item && item.key !== 'AZ' && item.approval_required && Number(item.event_id)
+    ) || null;
+  }
+
+  function annotatePermitAction(row, record) {
+    if (!row || !record) return;
+    let cells = row.querySelectorAll('td');
+    let actionCell = cells[9];
+    if (!actionCell) {
+      actionCell = document.createElement('td');
+      row.appendChild(actionCell);
+      cells = row.querySelectorAll('td');
+    }
+    actionCell.querySelector('.permit-decision-controls')?.remove();
+
+    if (record.status_class === 'done' || record.status_class === 'stopped') return;
+    const item = decisionItemForPermit(record);
+    if (!item) return;
+
+    if (actionCell.textContent.trim() === '—') actionCell.textContent = '';
+    const controls = document.createElement('div');
+    controls.className = 'permit-decision-controls';
+    if (item.approval_status === 'denied') {
+      controls.innerHTML = `<button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${Number(item.event_id)}">Снять запрет</button>`;
+    } else {
+      controls.innerHTML = `<button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${Number(item.event_id)}">Запретить работы</button>`;
+    }
+    actionCell.prepend(controls);
+  }
+
   function annotateWorks(records) {
     const byPermit = new Map(records.map(record => [String(record.permit_number || '').trim(), record]));
     document.querySelectorAll('#works-body tr').forEach(row => {
@@ -80,6 +120,8 @@
         }
       }
 
+      annotatePermitAction(row, record);
+
       const items = new Map((record.stage_items || []).map(item => [String(item.key), item]));
       row.querySelectorAll('.stage-detail-line').forEach(line => {
         const key = line.querySelector('small')?.textContent?.trim() || '';
@@ -104,16 +146,47 @@
     });
   }
 
+  function annotateTransmissions() {
+    document.querySelectorAll('#transmissions-body tr').forEach(row => {
+      const cells = row.querySelectorAll('td');
+      const statusText = cells[7]?.textContent?.trim() || '';
+      const actionCell = cells[8];
+      if (!actionCell) return;
+      actionCell.querySelector('.transmission-deny-control')?.remove();
+
+      if (statusText.includes('Не требуется') || statusText.includes('Отклонено')) return;
+      const eventId = Number(
+        row.dataset.eventId ||
+        row.querySelector('[data-review-event]')?.dataset.reviewEvent ||
+        row.querySelector('[data-approve-event]')?.dataset.approveEvent ||
+        0
+      );
+      if (!eventId) return;
+
+      if (actionCell.textContent.trim() === '—') actionCell.textContent = '';
+      const controls = document.createElement('div');
+      controls.className = 'transmission-deny-control';
+      if (statusText.includes('ЗАПРЕЩЕНО')) {
+        controls.innerHTML = `<button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${eventId}">Снять запрет</button>`;
+      } else {
+        controls.innerHTML = `<button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${eventId}">Запретить работы</button>`;
+      }
+      actionCell.appendChild(controls);
+    });
+  }
+
   function annotateSnapshot() {
-    if (!snapshot.length) return;
-    annotateWorks(snapshot);
+    if (snapshot.length) annotateWorks(snapshot);
+    annotateTransmissions();
   }
 
   function bindTableObservers() {
     if (tableObserversBound) return;
     tableObserversBound = true;
-    const body = document.querySelector('#works-body');
-    if (body) new MutationObserver(() => queueMicrotask(annotateSnapshot)).observe(body, {childList:true});
+    const worksBody = document.querySelector('#works-body');
+    const transmissionsBody = document.querySelector('#transmissions-body');
+    if (worksBody) new MutationObserver(() => queueMicrotask(annotateSnapshot)).observe(worksBody, {childList:true});
+    if (transmissionsBody) new MutationObserver(() => queueMicrotask(annotateTransmissions)).observe(transmissionsBody, {childList:true});
   }
 
   async function refreshDecisions() {
