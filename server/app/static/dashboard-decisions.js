@@ -39,16 +39,36 @@
     );
   }
 
+  function isDenied(item) {
+    return Boolean(
+      item?.approval_required &&
+      item.approval_status === 'denied' &&
+      Number(item.event_id)
+    );
+  }
+
+  function controlMode(item) {
+    if (isDenied(item)) return 'denied';
+    if (isPending(item)) return 'pending';
+    return '';
+  }
+
   function actionHtml(item, className = 'decision-controls') {
-    if (managerMode || !isPending(item)) return '';
+    if (managerMode) return '';
+    const mode = controlMode(item);
+    if (!mode) return '';
     const eventId = Number(item.event_id);
-    return `<div class="${className}" data-rpo-control-event="${eventId}"><button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${eventId}">Разрешить</button><button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${eventId}">Запретить работы</button></div>`;
+    if (mode === 'denied') {
+      return `<div class="${className}" data-rpo-control-event="${eventId}" data-rpo-control-mode="denied"><button type="button" class="allow-button" data-rpo-decision="approved" data-rpo-lift="true" data-event-id="${eventId}">Снять запрет</button></div>`;
+    }
+    return `<div class="${className}" data-rpo-control-event="${eventId}" data-rpo-control-mode="pending"><button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${eventId}">Разрешить</button><button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${eventId}">Запретить работы</button></div>`;
   }
 
   function syncControls(container, item, className, position = 'append') {
     if (!container) return;
     const existing = container.querySelector(`.${className}`);
-    if (managerMode || !isPending(item)) {
+    const mode = controlMode(item);
+    if (managerMode || !mode) {
       existing?.remove();
       return;
     }
@@ -56,8 +76,10 @@
     const eventId = Number(item.event_id);
     const completeExisting = existing &&
       existing.dataset.rpoControlEvent === String(eventId) &&
-      existing.querySelector('[data-rpo-decision="approved"]') &&
-      existing.querySelector('[data-rpo-decision="denied"]');
+      existing.dataset.rpoControlMode === mode &&
+      (mode === 'denied'
+        ? existing.querySelector('[data-rpo-lift="true"]')
+        : existing.querySelector('[data-rpo-decision="approved"]') && existing.querySelector('[data-rpo-decision="denied"]'));
     if (completeExisting) return;
 
     existing?.remove();
@@ -100,6 +122,16 @@
 
   function decisionItemForPermit(record) {
     const items = Array.isArray(record?.stage_items) ? record.stage_items : [];
+    const approval = record?.approval || {};
+    if (approval.status === 'denied' && approval.denied_field_key) {
+      const denied = items.find(item =>
+        item &&
+        item.key !== 'AZ' &&
+        String(item.key) === String(approval.denied_field_key) &&
+        isDenied(item)
+      );
+      if (denied) return denied;
+    }
     return [...items].reverse().find(item =>
       item && item.key !== 'AZ' && isPending(item)
     ) || null;
@@ -112,7 +144,8 @@
     if (!actionCell) return;
 
     removeLegacyFinishButtons(row);
-    const item = (record.status_class === 'done' || record.status_class === 'stopped')
+    const blocked = record?.approval?.status === 'denied';
+    const item = (!blocked && (record.status_class === 'done' || record.status_class === 'stopped'))
       ? null
       : decisionItemForPermit(record);
 
@@ -200,8 +233,13 @@
       actionCell.querySelectorAll('.review-controls,.approve-button').forEach(el => el.remove());
       removeLegacyFinishButtons(actionCell);
 
+      const denied = statusText.includes('ЗАПРЕЩЕНО') && eventId > 0;
       const pending = statusText.includes('Ожидает') && eventId > 0;
-      const item = pending ? {
+      const item = denied ? {
+        approval_required: true,
+        approval_status: 'denied',
+        event_id: eventId,
+      } : pending ? {
         approval_required: true,
         approval_status: 'pending',
         event_id: eventId,
@@ -257,6 +295,7 @@
   async function submitDecision(button) {
     const eventId = Number(button.dataset.eventId);
     const decision = button.dataset.rpoDecision;
+    const lifting = button.dataset.rpoLift === 'true';
     if (!eventId || !['approved','denied'].includes(decision)) return;
     let reason = '';
     if (decision === 'denied') {
@@ -265,13 +304,15 @@
       if (!reason) return;
       if (reason.length < 3) { alert('Причина запрета должна содержать не менее 3 символов.'); return; }
       if (!confirm('Запретить проведение работ? На телефоне этот НД будет полностью заблокирован красным экраном.')) return;
+    } else if (lifting) {
+      if (!confirm('Снять запрет проведения работ по этому НД? В приложении блокировка будет снята после следующей проверки статуса.')) return;
     } else if (!confirm('Разрешить проведение работ по этому этапу?')) {
       return;
     }
 
     button.disabled = true;
     const old = button.textContent;
-    button.textContent = decision === 'denied' ? 'Запрещаю…' : 'Разрешаю…';
+    button.textContent = decision === 'denied' ? 'Запрещаю…' : lifting ? 'Снимаю запрет…' : 'Разрешаю…';
     try {
       const response = await fetch(`/api/operator/events/${eventId}/decision`, {
         method: 'POST', credentials:'same-origin',
