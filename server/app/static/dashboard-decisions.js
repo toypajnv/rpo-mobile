@@ -1,22 +1,26 @@
 (() => {
   'use strict';
 
+  const managerMode = document.body.dataset.role === 'manager';
   const style = document.createElement('style');
   style.textContent = `
     .deny-button{border:1px solid #d92d20;background:#fff1f0;color:#b42318;border-radius:9px;padding:7px 10px;font-weight:800;cursor:pointer}
     .deny-button:hover{background:#fee4e2}.allow-button{border:1px solid #17a34a;background:#ecfdf3;color:#087a34;border-radius:9px;padding:7px 10px;font-weight:800;cursor:pointer}
-    .decision-controls,.permit-decision-controls,.transmission-deny-control{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .decision-controls,.permit-decision-controls,.transmission-deny-control{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+    .decision-controls button,.permit-decision-controls button,.transmission-deny-control button{width:100%}
     .decision-controls button:disabled,.permit-decision-controls button:disabled,.transmission-deny-control button:disabled{opacity:.55;cursor:wait}
     .badge.denied{background:#fee4e2!important;color:#b42318!important;border:1px solid #f97066!important}
     #works-body tr.rpo-blocked>td{background:#fff7f6}.blocked-permit-note{display:block;margin-top:5px;color:#b42318;font-weight:800;max-width:360px}
     .stage-detail-line.rpo-stage-denied{border-left:4px solid #d92d20;background:#fff4f2;padding-left:10px}
     #works-body td:last-child .permit-decision-controls{margin-bottom:6px}
+    #works-body .approve-button,#transmissions-body .approve-button,#transmissions-body .review-controls{display:none!important}
   `;
   document.head.appendChild(style);
 
   let snapshot = [];
   let refreshTimer = null;
   let tableObserversBound = false;
+  let transmissionAnnotationQueued = false;
 
   function filterQuery() {
     const q = new URLSearchParams({limit: '200'});
@@ -27,13 +31,42 @@
     return q;
   }
 
-  function actionHtml(item) {
-    if (!item?.approval_required || !Number(item.event_id)) return '—';
-    if (item.approval_status === 'denied') {
-      return `<div class="decision-controls"><button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${Number(item.event_id)}">Снять запрет</button></div>`;
+  function isPending(item) {
+    return Boolean(
+      item?.approval_required &&
+      item.approval_status === 'pending' &&
+      Number(item.event_id)
+    );
+  }
+
+  function actionHtml(item, className = 'decision-controls') {
+    if (managerMode || !isPending(item)) return '';
+    const eventId = Number(item.event_id);
+    return `<div class="${className}" data-rpo-control-event="${eventId}"><button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${eventId}">Разрешить</button><button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${eventId}">Запретить работы</button></div>`;
+  }
+
+  function syncControls(container, item, className, position = 'append') {
+    if (!container) return;
+    const existing = container.querySelector(`.${className}`);
+    if (managerMode || !isPending(item)) {
+      existing?.remove();
+      return;
     }
-    const allow = item.approval_status === 'approved' ? '' : `<button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${Number(item.event_id)}">Разрешить</button>`;
-    return `<div class="decision-controls">${allow}<button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${Number(item.event_id)}">Запретить работы</button></div>`;
+
+    const eventId = Number(item.event_id);
+    const completeExisting = existing &&
+      existing.dataset.rpoControlEvent === String(eventId) &&
+      existing.querySelector('[data-rpo-decision="approved"]') &&
+      existing.querySelector('[data-rpo-decision="denied"]');
+    if (completeExisting) return;
+
+    existing?.remove();
+    const holder = document.createElement('span');
+    holder.innerHTML = actionHtml(item, className);
+    const controls = holder.firstElementChild;
+    if (!controls) return;
+    if (position === 'prepend') container.prepend(controls);
+    else container.appendChild(controls);
   }
 
   function setBadge(container, item) {
@@ -44,54 +77,53 @@
       badge.className = 'badge';
       container.prepend(badge);
     }
-    badge.classList.remove('done', 'approval-wait', 'neutral', 'denied');
+    badge.classList.remove('done', 'approval-wait', 'neutral', 'denied', 'rejected');
     if (!item.approval_required) {
       badge.classList.add('neutral'); badge.textContent = 'Не требуется';
     } else if (item.approval_status === 'approved') {
       badge.classList.add('done'); badge.textContent = 'Разрешено';
     } else if (item.approval_status === 'denied') {
       badge.classList.add('denied'); badge.textContent = 'ЗАПРЕЩЕНО';
+    } else if (item.approval_status === 'rejected') {
+      badge.classList.add('neutral'); badge.textContent = 'Отклонено';
     } else {
       badge.classList.add('approval-wait'); badge.textContent = 'Ожидает';
     }
   }
 
+  function removeLegacyFinishButtons(root) {
+    root?.querySelectorAll('button').forEach(button => {
+      const text = button.textContent?.trim().toLocaleLowerCase('ru-RU') || '';
+      if (text === 'завершить работы' || text === 'завершить работу') button.remove();
+    });
+  }
+
   function decisionItemForPermit(record) {
     const items = Array.isArray(record?.stage_items) ? record.stage_items : [];
-    const approval = record?.approval || {};
-    if (approval.status === 'denied' && approval.denied_field_key) {
-      const denied = items.find(item => String(item.key) === String(approval.denied_field_key) && Number(item.event_id));
-      if (denied) return denied;
-    }
     return [...items].reverse().find(item =>
-      item && item.key !== 'AZ' && item.approval_required && Number(item.event_id)
+      item && item.key !== 'AZ' && isPending(item)
     ) || null;
   }
 
   function annotatePermitAction(row, record) {
     if (!row || !record) return;
-    let cells = row.querySelectorAll('td');
-    let actionCell = cells[9];
-    if (!actionCell) {
-      actionCell = document.createElement('td');
-      row.appendChild(actionCell);
-      cells = row.querySelectorAll('td');
-    }
-    actionCell.querySelector('.permit-decision-controls')?.remove();
+    const cells = row.querySelectorAll('td');
+    const actionCell = cells[9];
+    if (!actionCell) return;
 
-    if (record.status_class === 'done' || record.status_class === 'stopped') return;
-    const item = decisionItemForPermit(record);
-    if (!item) return;
+    removeLegacyFinishButtons(row);
+    const item = (record.status_class === 'done' || record.status_class === 'stopped')
+      ? null
+      : decisionItemForPermit(record);
+
+    if (!item) {
+      actionCell.querySelector('.permit-decision-controls')?.remove();
+      if (!actionCell.textContent.trim()) actionCell.textContent = '—';
+      return;
+    }
 
     if (actionCell.textContent.trim() === '—') actionCell.textContent = '';
-    const controls = document.createElement('div');
-    controls.className = 'permit-decision-controls';
-    if (item.approval_status === 'denied') {
-      controls.innerHTML = `<button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${Number(item.event_id)}">Снять запрет</button>`;
-    } else {
-      controls.innerHTML = `<button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${Number(item.event_id)}">Запретить работы</button>`;
-    }
-    actionCell.prepend(controls);
+    syncControls(actionCell, item, 'permit-decision-controls', 'prepend');
   }
 
   function annotateWorks(records) {
@@ -108,14 +140,17 @@
       if (cells[5]) {
         let badge = cells[5].querySelector('.badge');
         if (!badge) { badge = document.createElement('span'); badge.className = 'badge'; cells[5].prepend(badge); }
-        badge.classList.toggle('denied', blocked);
+        badge.classList.remove('done', 'approval-wait', 'neutral', 'denied');
         if (blocked) {
+          badge.classList.add('denied');
           badge.textContent = 'ПРОВЕДЕНИЕ ЗАПРЕЩЕНО';
           let note = cells[5].querySelector('.blocked-permit-note');
           if (!note) { note = document.createElement('small'); note.className = 'blocked-permit-note'; cells[5].appendChild(note); }
           const reason = approval.denied_reason ? ` Причина: ${approval.denied_reason}` : '';
           note.textContent = `${approval.denied_stage || 'Этап работ'}.${reason}`;
         } else {
+          badge.classList.add(approval.status === 'approved' ? 'done' : approval.status === 'pending' ? 'approval-wait' : 'neutral');
+          badge.textContent = approval.label || 'Разрешений пока нет';
           cells[5].querySelector('.blocked-permit-note')?.remove();
         }
       }
@@ -131,10 +166,8 @@
         let approvalBox = line.querySelector('.stage-approval');
         if (!approvalBox) { approvalBox = document.createElement('span'); approvalBox.className = 'stage-approval'; line.appendChild(approvalBox); }
         setBadge(approvalBox, item);
-        approvalBox.querySelectorAll('[data-approve-event],.decision-controls').forEach(el => el.remove());
-        const holder = document.createElement('span');
-        holder.innerHTML = actionHtml(item);
-        approvalBox.append(...holder.childNodes);
+        approvalBox.querySelectorAll('[data-approve-event]').forEach(el => el.remove());
+        syncControls(approvalBox, item, 'decision-controls');
         if (item.approval_status === 'denied' && approval.denied_field_key === item.key && approval.denied_reason) {
           let reason = line.querySelector('.blocked-permit-note');
           if (!reason) { reason = document.createElement('small'); reason.className = 'blocked-permit-note'; line.appendChild(reason); }
@@ -146,32 +179,42 @@
     });
   }
 
+  function transmissionEventId(row) {
+    return Number(
+      row.dataset.eventId ||
+      row.querySelector('[data-review-event]')?.dataset.reviewEvent ||
+      row.querySelector('[data-approve-event]')?.dataset.approveEvent ||
+      row.querySelector('[data-rpo-decision]')?.dataset.eventId ||
+      0
+    );
+  }
+
   function annotateTransmissions() {
     document.querySelectorAll('#transmissions-body tr').forEach(row => {
       const cells = row.querySelectorAll('td');
       const statusText = cells[7]?.textContent?.trim() || '';
       const actionCell = cells[8];
       if (!actionCell) return;
-      actionCell.querySelector('.transmission-deny-control')?.remove();
 
-      if (statusText.includes('Не требуется') || statusText.includes('Отклонено')) return;
-      const eventId = Number(
-        row.dataset.eventId ||
-        row.querySelector('[data-review-event]')?.dataset.reviewEvent ||
-        row.querySelector('[data-approve-event]')?.dataset.approveEvent ||
-        0
-      );
-      if (!eventId) return;
+      const eventId = transmissionEventId(row);
+      actionCell.querySelectorAll('.review-controls,.approve-button').forEach(el => el.remove());
+      removeLegacyFinishButtons(actionCell);
+
+      const pending = statusText.includes('Ожидает') && eventId > 0;
+      const item = pending ? {
+        approval_required: true,
+        approval_status: 'pending',
+        event_id: eventId,
+      } : null;
+
+      if (!item || managerMode) {
+        actionCell.querySelector('.transmission-deny-control')?.remove();
+        if (!actionCell.textContent.trim()) actionCell.textContent = '—';
+        return;
+      }
 
       if (actionCell.textContent.trim() === '—') actionCell.textContent = '';
-      const controls = document.createElement('div');
-      controls.className = 'transmission-deny-control';
-      if (statusText.includes('ЗАПРЕЩЕНО')) {
-        controls.innerHTML = `<button type="button" class="allow-button" data-rpo-decision="approved" data-event-id="${eventId}">Снять запрет</button>`;
-      } else {
-        controls.innerHTML = `<button type="button" class="deny-button" data-rpo-decision="denied" data-event-id="${eventId}">Запретить работы</button>`;
-      }
-      actionCell.appendChild(controls);
+      syncControls(actionCell, item, 'transmission-deny-control');
     });
   }
 
@@ -180,13 +223,22 @@
     annotateTransmissions();
   }
 
+  function queueTransmissionAnnotation() {
+    if (transmissionAnnotationQueued) return;
+    transmissionAnnotationQueued = true;
+    queueMicrotask(() => {
+      transmissionAnnotationQueued = false;
+      annotateTransmissions();
+    });
+  }
+
   function bindTableObservers() {
     if (tableObserversBound) return;
     tableObserversBound = true;
     const worksBody = document.querySelector('#works-body');
     const transmissionsBody = document.querySelector('#transmissions-body');
     if (worksBody) new MutationObserver(() => queueMicrotask(annotateSnapshot)).observe(worksBody, {childList:true});
-    if (transmissionsBody) new MutationObserver(() => queueMicrotask(annotateTransmissions)).observe(transmissionsBody, {childList:true});
+    if (transmissionsBody) new MutationObserver(queueTransmissionAnnotation).observe(transmissionsBody, {childList:true, subtree:true});
   }
 
   async function refreshDecisions() {
@@ -213,7 +265,7 @@
       if (!reason) return;
       if (reason.length < 3) { alert('Причина запрета должна содержать не менее 3 символов.'); return; }
       if (!confirm('Запретить проведение работ? На телефоне этот НД будет полностью заблокирован красным экраном.')) return;
-    } else if (!confirm('Разрешить проведение работ и снять блокировку НД по этому этапу?')) {
+    } else if (!confirm('Разрешить проведение работ по этому этапу?')) {
       return;
     }
 
