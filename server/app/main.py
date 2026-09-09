@@ -30,7 +30,7 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.8.1"
+_core.app.version = "0.8.0"
 
 # Keep the historical JSON artifact on the server for rollback/local-import
 # compatibility, but email only the XLSX requested by the operator.
