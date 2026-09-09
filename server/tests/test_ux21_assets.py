@@ -24,7 +24,7 @@ class Ux21AssetsTest(unittest.TestCase):
         review = (APP_DIR / "static" / "dashboard-transmission-review.js").read_text(encoding="utf-8")
         self.assertIn("dashboard-core.js?v=20260830-1", loader)
         self.assertIn("dashboard-ux.js?v=20260830-1", loader)
-        self.assertIn("dashboard-transmission-review.js?v=20260904-1", loader)
+        self.assertNotIn("dashboard-transmission-review.js", loader)
         self.assertIn("refreshWorks", core)
         self.assertIn("Требуют внимания", ux)
         self.assertIn("ux-drawer", ux)
@@ -35,7 +35,6 @@ class Ux21AssetsTest(unittest.TestCase):
         self.assertNotIn('rpo-blocked-banner', decisions)
         self.assertIn('Отклонить', review)
         self.assertIn('/api/operator/transmissions/${eventId}/review', review)
-        self.assertIn('Не рассмотрено', review)
 
     def test_pwa_ux_122_assets_are_installable_cached_and_fail_safe(self):
         index = (APP_DIR / "pwa" / "index.html").read_text(encoding="utf-8")

@@ -7,18 +7,19 @@ from app import main
 
 class DashboardCacheBustTests(unittest.TestCase):
     def test_dashboard_loader_revision_forces_fresh_operator_controls(self) -> None:
-        self.assertEqual(main.DASHBOARD_ASSET_VERSION, "20260909-3")
+        self.assertEqual(main.DASHBOARD_ASSET_VERSION, "20260909-4")
         source, _, _ = main._core.templates.env.loader.get_source(
             main._core.templates.env, "dashboard.html"
         )
-        self.assertIn('/static/dashboard.js?v=20260909-3', source)
-        self.assertIn('/static/dashboard-decisions.js?v=20260909-3', source)
+        self.assertIn('/static/dashboard.js?v=20260909-4', source)
+        self.assertIn('/static/dashboard-decisions.js?v=20260909-4', source)
         self.assertNotIn('/static/dashboard.js?v=20260829-2', source)
         self.assertNotIn('/static/dashboard.js?v=20260831-2', source)
 
     def test_pending_decision_controls_and_lift_prohibition_action(self) -> None:
         loader = (main._core.BASE_DIR / "static" / "dashboard.js").read_text(encoding="utf-8")
         decisions = (main._core.BASE_DIR / "static" / "dashboard-decisions.js").read_text(encoding="utf-8")
+        self.assertNotIn("dashboard-transmission-review.js", loader)
         self.assertNotIn(".then(() => load('/static/dashboard-decisions.js", loader)
         self.assertIn('data-rpo-decision="approved"', decisions)
         self.assertIn('data-rpo-decision="denied"', decisions)

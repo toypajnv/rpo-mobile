@@ -9,11 +9,10 @@
     document.head.appendChild(script);
   });
   // Decision controls are injected directly by the server-rendered dashboard HTML.
-  // Legacy production-smoke marker retained until its next contract revision:
-  // dashboard-decisions.js?v=20260831-1
+  // The old transmission-review renderer is intentionally not loaded: it rewrote
+  // the same action column every 2.4 seconds and caused visible button blinking.
   load('/static/dashboard-core.js?v=20260830-1')
     .then(() => load('/static/dashboard-ux.js?v=20260830-1'))
-    .then(() => load('/static/dashboard-transmission-review.js?v=20260904-1'))
     .then(() => load('/static/dashboard-notifications.js?v=20260904-1'))
     .catch((error) => console.error('RPO dashboard loader', error));
 })();
