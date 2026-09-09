@@ -21,7 +21,7 @@ MIN_SUPPORTED_MOBILE_VERSION = _core.MIN_SUPPORTED_MOBILE_VERSION
 MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.3.0-test/rpo-mobile-2.3.0.apk"
 PWA_VERSION = "1.3.0"
 PWA_URL = _core.PWA_URL
-DASHBOARD_ASSET_VERSION = "20260904-2"
+DASHBOARD_ASSET_VERSION = "20260909-1"
 DASHBOARD_PHONE_VERSION = "20260903-1"
 PWA_ENTRY_HOTFIX_VERSION = "20260901-1"
 PWA_HISTORY_STATUS_VERSION = "20260901-1"
@@ -30,7 +30,7 @@ _core.LATEST_MOBILE_VERSION = LATEST_MOBILE_VERSION
 _core.MOBILE_APK_URL = MOBILE_APK_URL
 _core.PWA_VERSION = PWA_VERSION
 _core.PWA_URL = PWA_URL
-_core.app.version = "0.8.0"
+_core.app.version = "0.8.1"
 
 # Keep the historical JSON artifact on the server for rollback/local-import
 # compatibility, but email only the XLSX requested by the operator.
