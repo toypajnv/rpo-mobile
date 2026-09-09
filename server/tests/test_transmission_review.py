@@ -112,15 +112,13 @@ class TransmissionReviewTests(unittest.TestCase):
             self.assertTrue(reviewed["approval_required"])
             self.assertEqual(reviewed["approval_status"], "approved")
 
-    def test_dashboard_review_asset_has_allow_reject_and_no_global_ban_banner(self) -> None:
+    def test_review_backend_is_preserved_but_competing_dashboard_renderer_is_disabled(self) -> None:
         static = main._core.BASE_DIR / "static"
         loader = (static / "dashboard.js").read_text(encoding="utf-8")
         review = (static / "dashboard-transmission-review.js").read_text(encoding="utf-8")
         decisions = (static / "dashboard-decisions.js").read_text(encoding="utf-8")
-        self.assertIn("dashboard-transmission-review.js?v=20260904-1", loader)
-        self.assertIn("Разрешить", review)
+        self.assertNotIn("dashboard-transmission-review.js", loader)
         self.assertIn("Отклонить", review)
-        self.assertIn("Не рассмотрено", review)
         self.assertIn("/api/operator/transmissions/${eventId}/review", review)
         self.assertNotIn("rpo-blocked-banner", decisions)
 
