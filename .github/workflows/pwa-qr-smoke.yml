@@ -1,0 +1,50 @@
+name: PWA and QR target smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-public-install-targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify iOS PWA launch target
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 15 'https://rpo-mng.ru/app/?home=20260915' -o /tmp/rpo.html
+          grep -F 'РПО — работы повышенной опасности' /tmp/rpo.html
+          grep -F 'pwa-early-service-worker' /tmp/rpo.html
+          grep -F "navigator.serviceWorker.register('/app/sw.js',{scope:'/app/'})" /tmp/rpo.html
+
+          curl -fsS --max-time 15 'https://rpo-mng.ru/app/manifest.webmanifest' -o /tmp/manifest.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('/tmp/manifest.json').read_text())
+          assert m['start_url'] == '/app/?home=20260915', m
+          assert m['scope'] == '/app/', m
+          assert m['display'] == 'standalone', m
+          print('manifest start_url OK')
+          PY
+
+          curl -fsS -D /tmp/sw.headers --max-time 15 'https://rpo-mng.ru/app/sw.js' -o /tmp/sw.js
+          grep -Fi 'service-worker-allowed: /app/' /tmp/sw.headers
+          grep -F "const CACHE='rpo-pwa-shell-v1.3.0-r2'" /tmp/sw.js
+          grep -F "'/app/?home=20260915'" /tmp/sw.js
+          grep -F "fetch(req,{cache:'no-store'})" /tmp/sw.js
+          grep -F 'return offlineShell()' /tmp/sw.js
+
+      - name: Verify Android APK target
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/toypajnv/rpo-mobile/releases/download/v2.3.0-test/rpo-mobile-2.3.0.apk'
+          curl -fL --max-time 30 --retry 2 --range 0-1023 "$url" -o /tmp/rpo.apk.part
+          test -s /tmp/rpo.apk.part
+          echo 'Android APK download target OK'
