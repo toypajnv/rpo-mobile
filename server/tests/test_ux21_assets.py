@@ -38,6 +38,7 @@ class Ux21AssetsTest(unittest.TestCase):
 
     def test_pwa_ux_122_assets_are_installable_cached_and_fail_safe(self):
         index = (APP_DIR / "pwa" / "index.html").read_text(encoding="utf-8")
+        manifest = (APP_DIR / "pwa" / "manifest.webmanifest").read_text(encoding="utf-8")
         sw = (APP_DIR / "pwa" / "sw.js").read_text(encoding="utf-8")
         ux = (APP_DIR / "pwa" / "ux.js").read_text(encoding="utf-8")
         sync = (APP_DIR / "pwa" / "sync-status.js").read_text(encoding="utf-8")
@@ -47,7 +48,11 @@ class Ux21AssetsTest(unittest.TestCase):
         self.assertIn("/pwa-assets/ux.js?v=20260830-2", index)
         self.assertIn("/pwa-assets/sync-status.js?v=20260831-1", index)
         self.assertIn("/pwa-assets/deny-lock.js?v=20260831-1", index)
-        self.assertIn("rpo-pwa-shell-v1.3.0", sw)
+        self.assertIn('"start_url": "/app/?home=20260915"', manifest)
+        self.assertIn("rpo-pwa-shell-v1.3.0-r2", sw)
+        self.assertIn("/app/?home=20260915", sw)
+        self.assertIn("fetch(req,{cache:'no-store'})", sw)
+        self.assertIn("return offlineShell();", sw)
         self.assertIn("Promise.allSettled", sw)
         self.assertIn("Нет связи с сервером", sw)
         self.assertIn("sync-status.js?v=20260831-1", sw)
