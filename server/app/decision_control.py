@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .event_dedupe import install_event_dedupe
 from .models import MobileEvent, Operator, PermitRecord
 from .services.exporter import record_data
 
@@ -73,6 +74,10 @@ def install_decision_control(core) -> None:
     if getattr(core, "_decision_control_installed", False):
         return
     core._decision_control_installed = True
+
+    # Retries from Android/iOS must be idempotent by the logical stage value before
+    # operator approval logic is layered on top of the preserved core endpoint.
+    install_event_dedupe(core)
 
     core._decision_control_original_summary = core._approval_summary_from_data
     core._approval_summary_from_data = lambda data: _decision_summary(core, data)
