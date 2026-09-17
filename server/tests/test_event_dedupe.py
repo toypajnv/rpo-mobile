@@ -70,7 +70,10 @@ class EventDedupeTests(unittest.TestCase):
 
             self.assertEqual(second.id, first_id)
             self.assertEqual(second.event_time, second_time)
-            self.assertGreaterEqual(second.received_at, first_received_at)
+            self.assertGreaterEqual(
+                main._core.dt_utc(second.received_at),
+                main._core.dt_utc(first_received_at),
+            )
             self.assertEqual(second.comment, "повторное нажатие")
             count = db.scalar(select(func.count()).select_from(MobileEvent))
             self.assertEqual(count, 1)
