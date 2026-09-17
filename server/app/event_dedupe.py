@@ -270,6 +270,12 @@ def install_event_dedupe(core) -> None:
             _refresh_current_record(db, existing)
             db.commit()
             db.refresh(existing)
+            # SQLite drops timezone metadata on DateTime round-trips; normalize the
+            # response object so API/test behavior matches PostgreSQL UTC values.
+            existing.received_at = _as_utc(existing.received_at)
+            existing.event_time = _as_utc(existing.event_time)
+            if existing.approved_at is not None:
+                existing.approved_at = _as_utc(existing.approved_at)
             return existing
 
         # Keep the client's event id. The existing UNIQUE(client_event_id) remains
