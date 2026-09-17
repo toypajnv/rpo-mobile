@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal
@@ -12,50 +13,143 @@ from .models import MobileEvent, PermitRecord
 from .services.exporter import record_data
 
 
+DEDUPE_WINDOW_SECONDS = 60
+
+
 def _normalize_text(value: str | None) -> str:
     return " ".join(str(value or "").strip().split())
 
 
-def _semantic_key(permit_number: str, field_key: str, field_value: str) -> tuple[str, str, str]:
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _semantic_key(
+    permit_number: str,
+    worker_name: str,
+    structural_unit: str,
+    field_key: str,
+    field_value: str,
+) -> tuple[str, str, str, str, str]:
     return (
         _normalize_text(permit_number).upper(),
+        _normalize_text(worker_name).upper(),
+        _normalize_text(structural_unit).upper(),
         _normalize_text(field_key).upper(),
         _normalize_text(field_value),
     )
 
 
-def _semantic_client_event_id(payload) -> str:
-    permit, field_key, field_value = _semantic_key(
+def _payload_semantic_key(payload) -> tuple[str, str, str, str, str]:
+    return _semantic_key(
         payload.permit_number,
+        payload.worker_name,
+        payload.structural_unit or "",
         payload.field_key,
         payload.field_value,
     )
-    raw = f"{permit}|{field_key}|{field_value}"
-    return "semantic-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:48]
 
 
-def _find_semantic_duplicate(db: Session, payload) -> MobileEvent | None:
+def _event_semantic_key(event: MobileEvent) -> tuple[str, str, str, str, str]:
+    return _semantic_key(
+        event.permit_number,
+        event.worker_name,
+        event.structural_unit or "",
+        event.field_key,
+        event.field_value,
+    )
+
+
+def _lock_id(key: tuple[str, ...]) -> int:
+    digest = hashlib.sha256("|".join(key).encode("utf-8")).digest()
+    value = int.from_bytes(digest[:8], "big", signed=False)
+    return value if value < 2**63 else value - 2**64
+
+
+def _acquire_semantic_lock(db: Session, payload) -> None:
+    """Serialize identical logical submissions on PostgreSQL.
+
+    SQLite is used by the test suite and does not support advisory locks.
+    """
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_id)"),
+        {"lock_id": _lock_id(_payload_semantic_key(payload))},
+    )
+
+
+def _find_recent_semantic_duplicate(
+    db: Session,
+    payload,
+    received_at: datetime,
+) -> MobileEvent | None:
+    """Return only the latest same stage when it is the same logical press.
+
+    The window is intentionally based on server receipt time, not client event_time:
+    two user taps can have different client timestamps while still representing one
+    logical notification.
+    """
     permit = _normalize_text(payload.permit_number).upper()
     field_key = _normalize_text(payload.field_key).upper()
-    expected_value = _normalize_text(payload.field_value)
 
-    # Query a small recent slice and normalize in Python. This also catches legacy
-    # rows that may contain harmless extra whitespace in the transmitted value.
-    candidates = list(
-        db.scalars(
-            select(MobileEvent)
-            .where(
-                MobileEvent.permit_number == permit,
-                MobileEvent.field_key == field_key,
-            )
-            .order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc())
-            .limit(20)
+    latest = db.scalar(
+        select(MobileEvent)
+        .where(
+            func.upper(MobileEvent.permit_number) == permit,
+            func.upper(MobileEvent.field_key) == field_key,
         )
+        .order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc())
+        .limit(1)
     )
-    for event in candidates:
-        if _normalize_text(event.field_value) == expected_value:
-            return event
-    return None
+    if latest is None:
+        return None
+    if _event_semantic_key(latest) != _payload_semantic_key(payload):
+        return None
+
+    age = received_at - _as_utc(latest.received_at)
+    if age < timedelta(0):
+        age = timedelta(0)
+    if age > timedelta(seconds=DEDUPE_WINDOW_SECONDS):
+        return None
+    return latest
+
+
+def _refresh_current_record(db: Session, event: MobileEvent) -> None:
+    """Refresh only latest-transmission fields without resetting a decision/export."""
+    record = db.scalar(
+        select(PermitRecord).where(PermitRecord.permit_number == event.permit_number)
+    )
+    if record is None:
+        return
+
+    data = record_data(record)
+    current = data.get(event.field_key)
+    if not isinstance(current, dict):
+        return
+    try:
+        current_event_id = int(current.get("event_id") or 0)
+    except (TypeError, ValueError):
+        current_event_id = 0
+    if current_event_id != event.id:
+        return
+
+    # Keep approval_status, approved_at, approved_by_id, denied_reason and any
+    # future operator metadata already present in the canonical record.
+    current["stage_label"] = event.stage_label
+    current["field_value"] = event.field_value
+    current["event_time"] = event.event_time.isoformat()
+    current["comment"] = event.comment or ""
+
+    record.device_id = event.device_id
+    record.worker_name = event.worker_name
+    if event.structural_unit:
+        record.structural_unit = event.structural_unit
+    record.data_json = json.dumps(data, ensure_ascii=False)
+    record.updated_at = event.received_at
 
 
 def _current_event_ids(db: Session) -> dict[tuple[str, str], int]:
@@ -79,12 +173,11 @@ def _current_event_ids(db: Session) -> dict[tuple[str, str], int]:
 
 
 def cleanup_redundant_stage_rows(core) -> int:
-    """Remove only non-current duplicate rows left by earlier client retries.
+    """Remove legacy duplicate rows only inside the server dedupe window.
 
-    A row is removed only when the canonical PermitRecord already points to another
-    event for the same permit/stage and both rows carry the same transmitted value.
-    This keeps the authoritative current event and prevents old pending duplicates
-    from being shown in the operator journal.
+    The authoritative row is the one already referenced by PermitRecord, which is
+    normally the last press. Older identical rows farther than 60 seconds away are
+    kept because they may represent a real later repetition of the same stage/value.
     """
     removed = 0
     with SessionLocal() as db:
@@ -97,12 +190,11 @@ def cleanup_redundant_stage_rows(core) -> int:
                 )
             )
         )
-        groups: dict[tuple[str, str, str], list[MobileEvent]] = {}
+        groups: dict[tuple[str, str, str, str, str], list[MobileEvent]] = {}
         for event in events:
-            key = _semantic_key(event.permit_number, event.field_key, event.field_value)
-            groups.setdefault(key, []).append(event)
+            groups.setdefault(_event_semantic_key(event), []).append(event)
 
-        for (permit, field_key, _), group in groups.items():
+        for (permit, _, _, field_key, _), group in groups.items():
             if len(group) < 2:
                 continue
             current_id = current_ids.get((permit, field_key))
@@ -112,25 +204,30 @@ def cleanup_redundant_stage_rows(core) -> int:
             if canonical is None:
                 continue
 
-            # Preserve a useful comment if the current row is blank but an older
-            # duplicate contains one. No approval decision is copied or changed.
+            canonical_received = _as_utc(canonical.received_at)
+            duplicates = [
+                event
+                for event in group
+                if event.id != canonical.id
+                and timedelta(0)
+                <= canonical_received - _as_utc(event.received_at)
+                <= timedelta(seconds=DEDUPE_WINDOW_SECONDS)
+            ]
+            if not duplicates:
+                continue
+
+            # Preserve a useful comment if the latest row is blank but an older
+            # duplicate contains one. Approval decisions are never reset.
             if not _normalize_text(canonical.comment):
-                richer = next((event for event in group if _normalize_text(event.comment)), None)
+                richer = next(
+                    (event for event in duplicates if _normalize_text(event.comment)),
+                    None,
+                )
                 if richer is not None:
                     canonical.comment = richer.comment
-                    record = db.scalar(
-                        select(PermitRecord).where(PermitRecord.permit_number == canonical.permit_number)
-                    )
-                    if record is not None:
-                        data = record_data(record)
-                        current = data.get(canonical.field_key)
-                        if isinstance(current, dict) and int(current.get("event_id") or 0) == canonical.id:
-                            current["comment"] = canonical.comment or ""
-                            record.data_json = json.dumps(data, ensure_ascii=False)
+                    _refresh_current_record(db, canonical)
 
-            for event in group:
-                if event.id == canonical.id:
-                    continue
+            for event in duplicates:
                 db.delete(event)
                 removed += 1
 
@@ -140,7 +237,7 @@ def cleanup_redundant_stage_rows(core) -> int:
 
 
 def install_event_dedupe(core) -> None:
-    """Make a permit stage/value idempotent across Android and iOS retries."""
+    """Collapse rapid duplicate taps on the server without changing the clients."""
     if getattr(core, "_semantic_event_dedupe_installed", False):
         return
     core._semantic_event_dedupe_installed = True
@@ -148,33 +245,36 @@ def install_event_dedupe(core) -> None:
     original_create = core.create_mobile_event
 
     def create_mobile_event_deduped(payload, db: Session):
-        existing = _find_semantic_duplicate(db, payload)
+        received_at = core.utcnow()
+        _acquire_semantic_lock(db, payload)
+
+        existing = _find_recent_semantic_duplicate(db, payload, received_at)
         if existing is not None:
-            # A changed comment must not create a second stage row. Before an
-            # operator decision we allow the comment to be refreshed in-place;
-            # after a decision the accepted/denied record remains immutable.
+            # "Last press wins" for transmission metadata. The row id and all
+            # operator decision fields stay unchanged, so an approved/denied stage
+            # cannot be reset to pending by another identical tap.
+            existing.received_at = received_at
+            existing.event_time = core.dt_utc(payload.event_time)
+            existing.device_id = payload.device_id
+            existing.worker_name = payload.worker_name
+            existing.structural_unit = payload.structural_unit or ""
+            incoming_label = str(payload.stage_label or "").strip()
+            if incoming_label:
+                existing.stage_label = incoming_label
+            existing.field_value = payload.field_value
+
             incoming_comment = str(payload.comment or "").strip()
-            current_status = str(existing.approval_status or "not_required")
-            if (
-                incoming_comment
-                and incoming_comment != str(existing.comment or "").strip()
-                and current_status in {"pending", "not_required"}
-            ):
-                existing.comment = incoming_comment
-                if str(payload.stage_label or "").strip():
-                    existing.stage_label = payload.stage_label
-                core._apply_event_to_record(db, existing)
-                db.commit()
-                db.refresh(existing)
+            if incoming_comment:
+                existing.comment = payload.comment
+
+            _refresh_current_record(db, existing)
+            db.commit()
+            db.refresh(existing)
             return existing
 
-        # Use a deterministic server-side id for the same logical stage/value.
-        # The existing UNIQUE(client_event_id) constraint then also protects from
-        # simultaneous retries that reach the server at the same moment.
-        semantic_payload = payload.model_copy(
-            update={"client_event_id": _semantic_client_event_id(payload)}
-        )
-        return original_create(semantic_payload, db)
+        # Keep the client's event id. The existing UNIQUE(client_event_id) remains
+        # a second idempotency layer for ordinary network retries even after 60 sec.
+        return original_create(payload, db)
 
     core.create_mobile_event = create_mobile_event_deduped
     for route in core.app.routes:
@@ -187,8 +287,8 @@ def install_event_dedupe(core) -> None:
                 route.dependant.call = create_mobile_event_deduped
             break
 
-    # Cleanup is intentionally conservative and runs only after the normal core
-    # lifespan has created/upgraded tables and rebuilt the canonical permit rows.
+    # Cleanup is conservative and runs only after the normal core lifespan has
+    # created/upgraded tables and rebuilt the canonical permit rows.
     original_lifespan = core.app.router.lifespan_context
 
     @asynccontextmanager
