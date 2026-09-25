@@ -28,7 +28,7 @@ class PbMngWorkflowTests(unittest.TestCase):
             self.assertEqual(catalog_response.status_code, 200, catalog_response.text)
             catalog = catalog_response.json()
             self.assertGreaterEqual(len(catalog["violations"]), 170)
-            rule = next(item for item in catalog["violations"] if len(item["severities"]) == 1)
+            rule = next(item for item in catalog["violations"] if len(item["severities"]) == 1 and item["severities"][0] in {"gross", "significant"})
 
             payload = {
                 "device_id": "pb-device-test",
