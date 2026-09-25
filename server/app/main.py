@@ -251,3 +251,8 @@ app.include_router(ostanovka_router)
 # Isolated PB_MNG mobile prototype. It does not mutate the existing RPO PWA/API.
 from .pb_mng import router as pb_mng_router
 app.include_router(pb_mng_router)
+
+
+# PB_MNG stop-work process API, coordinator workspace and live access restrictions.
+from .pb_mng_process import router as pb_mng_process_router
+app.include_router(pb_mng_process_router)
