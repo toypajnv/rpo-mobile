@@ -1,4 +1,4 @@
-name: PB_MNG Prototype Smoke
+name: PB_MNG Live Smoke
 
 on:
   push:
@@ -9,27 +9,43 @@ permissions:
   contents: read
 
 jobs:
-  verify-pb-mng:
+  live:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 8
     steps:
-      - name: Wait for PB_MNG autodeploy
+      - name: Wait for PB_MNG v1 autodeploy
         shell: bash
         run: |
           set -euo pipefail
           ok=0
-          for attempt in $(seq 1 36); do
+          for attempt in $(seq 1 42); do
             page="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/ 2>/dev/null || true)"
-            manifest="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/manifest.webmanifest 2>/dev/null || true)"
             sw="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/sw.js 2>/dev/null || true)"
-            if [[ "$page" == *'ПБ_МНГ'* ]] \
-              && [[ "$page" == *'Остановить работу'* ]] \
-              && [[ "$manifest" == *'"/pb-mng/"'* ]] \
-              && [[ "$sw" == *'pb-mng-prototype-20260925-1'* ]]; then
-              echo "PB_MNG prototype is live on attempt $attempt"
+            catalog="$(curl -fsS --max-time 10 https://rpo-mng.ru/api/pb-mng/catalog 2>/dev/null || true)"
+            openapi="$(curl -fsS --max-time 10 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
+            if [[ "$page" == *'РПО и полный цикл остановки'* ]] \
+              && [[ "$sw" == *'pb-mng-v1-20260925-2'* ]] \
+              && [[ "$catalog" == *'"violations"'* ]] \
+              && [[ "$catalog" == *'"minor_reclassify_minutes":60'* ]] \
+              && [[ "$openapi" == *'"/api/pb-mng/stops"'* ]] \
+              && [[ "$openapi" == *'"/api/pb-mng/coordinator/stops/{public_id}/review"'* ]]; then
+              python3 - <<'PY'
+import json, urllib.request
+data=json.load(urllib.request.urlopen('https://rpo-mng.ru/api/pb-mng/catalog', timeout=10))
+assert len(data['violations']) >= 170, len(data['violations'])
+assert data['process_rules']['minor_reclassify_minutes'] == 60
+print('PB_MNG catalog:', len(data['violations']), 'violations')
+PY
               ok=1
               break
             fi
+            echo "Waiting for PB_MNG v1: $attempt/42"
             sleep 10
           done
           test "$ok" = "1"
+
+      - name: Coordinator remains protected
+        shell: bash
+        run: |
+          code="$(curl -sS -o /dev/null -w '%{http_code}' https://rpo-mng.ru/pb-mng/coordinator/)"
+          test "$code" = "200" -o "$code" = "303"
