@@ -246,3 +246,8 @@ async def inject_pwa_release_hotfixes(request, call_next):
 # the existing lifespan Base.metadata.create_all() creates them automatically.
 from .ostanovka import router as ostanovka_router
 app.include_router(ostanovka_router)
+
+
+# Isolated PB_MNG mobile prototype. It does not mutate the existing RPO PWA/API.
+from .pb_mng import router as pb_mng_router
+app.include_router(pb_mng_router)
