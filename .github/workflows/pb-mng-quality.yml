@@ -35,5 +35,14 @@ jobs:
         run: |
           node --check server/app/pb_mng/app.js
           node --check server/app/pb_mng/sw.js
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          src = Path('server/app/templates/pb_mng_coordinator.html').read_text(encoding='utf-8')
+          scripts = re.findall(r'<script>(.*?)</script>', src, flags=re.S)
+          assert scripts, 'Coordinator script not found'
+          Path('/tmp/pb-coordinator.js').write_text(scripts[-1], encoding='utf-8')
+          PY
+          node --check /tmp/pb-coordinator.js
       - name: Run PB_MNG workflow test
         run: python -m unittest server.tests.test_pb_mng_workflow -v
