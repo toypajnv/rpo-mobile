@@ -109,6 +109,8 @@ def coordinator_operator(request: Request, db: Session = Depends(get_db)) -> Ope
     operator = _current_operator_or_none(request, db)
     if not operator:
         raise HTTPException(status_code=401, detail="Требуется вход координатора")
+    if request.method.upper() != "GET" and (getattr(operator, "role", "operator") or "operator") == "manager":
+        raise HTTPException(status_code=403, detail="Роль «Руководитель» работает только в режиме просмотра")
     return operator
 
 
