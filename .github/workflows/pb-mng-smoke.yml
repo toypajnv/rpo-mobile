@@ -33,7 +33,10 @@ jobs:
               && [[ "$coordinator_js" == *'startCoordinator()'* ]] \
               && [[ "$coordinator_js" == *'photoBlock('* ]] \
               && [[ "$coordinator_js" == *'reviewViolationId'* ]] \
-              && [[ "$coordinator_js" == *'loadRegistry()'* ]]; then
+              && [[ "$coordinator_js" == *'loadRegistry()'* ]] \
+              && [[ "$coordinator_js" == *'applyQueueFilter'* ]] \
+              && [[ "$coordinator_js" == *'ready_for_unblock'* ]] \
+              && [[ "$coordinator_js" == *'nextActionHtml'* ]]; then
               count="$(python3 -c "import json,sys; print(len(json.load(sys.stdin)['violations']))" <<<"$catalog")"
               test "$count" -ge 170
               echo "PB_MNG catalog: $count violations"
