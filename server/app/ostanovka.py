@@ -218,6 +218,20 @@ def ostanovka_check(payload: PassCheckRequest, db: Session = Depends(get_db)):
         if fio:
             result = _apply_ukz_policy(result, find_ukz_block(db, fio))
 
+    # Live restrictions created by PB_MNG are stored separately from the
+    # historical XLSB registry so a later mailbox import cannot erase them.
+    from .pb_mng_process import active_pb_restrictions
+    live_blocks = active_pb_restrictions(db, canonical_pass)
+    if live_blocks:
+        blocks = list(result.get("blocks") or []) + live_blocks
+        result = {
+            **result,
+            "status": "denied",
+            "title": "Доступ запрещен",
+            "message": "" if len(blocks) == 1 else "Обнаружено несколько ограничений доступа.",
+            "blocks": blocks,
+        }
+
     response = JSONResponse(result)
     response.headers["Cache-Control"] = "no-store"
     return response
