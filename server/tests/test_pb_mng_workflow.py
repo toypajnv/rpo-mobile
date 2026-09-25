@@ -64,6 +64,18 @@ class PbMngWorkflowTests(unittest.TestCase):
             login = client.post("/login", data={"username": "admin", "password": "Test123!"}, follow_redirects=False)
             self.assertEqual(login.status_code, 303, login.text)
 
+            stats = client.get("/api/pb-mng/coordinator/stats")
+            self.assertEqual(stats.status_code, 200, stats.text)
+            stats_data = stats.json()
+            self.assertIn("by_status", stats_data)
+            for expected_status in [
+                "pending_verification", "returned_for_revision", "awaiting_resolution",
+                "resolution_submitted", "resolution_revision", "awaiting_pkm",
+                "awaiting_training", "ready_for_unblock", "closed", "rejected",
+            ]:
+                self.assertIn(expected_status, stats_data["by_status"])
+            self.assertGreaterEqual(stats_data["by_status"]["pending_verification"], 1)
+
             reviewed = client.post(
                 f"/api/pb-mng/coordinator/stops/{stop_id}/review",
                 json={
@@ -92,6 +104,10 @@ class PbMngWorkflowTests(unittest.TestCase):
             coordinator_page = client.get("/pb-mng/coordinator/")
             self.assertEqual(coordinator_page.status_code, 200, coordinator_page.text)
             self.assertIn("Реестр остановок", coordinator_page.text)
+            self.assertIn("Рабочая очередь", coordinator_page.text)
+            self.assertIn('data-status-card="resolution_submitted"', coordinator_page.text)
+            self.assertIn('data-status-card="ready_for_unblock"', coordinator_page.text)
+            self.assertIn("Настройки", coordinator_page.text)
 
             resolution = client.post(
                 f"/api/pb-mng/stops/{stop_id}/resolution",
