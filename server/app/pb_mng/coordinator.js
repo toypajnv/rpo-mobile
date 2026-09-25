@@ -1,4 +1,4 @@
-const $=s=>document.querySelector(s);let selected=null,catalog=null;
+const $=s=>document.querySelector(s);let selected=null,catalog=null,reviewViolationId='',reviewSeverity='';
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function fmt(v){if(!v)return'';return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(v))}function cls(s){if(s==='closed')return'green';if(s==='rejected')return'red';if(['pending_verification','resolution_submitted'].includes(s))return'blue';return'amber'}async function api(url,opts={}){const r=await fetch(url,opts);const d=(r.headers.get('content-type')||'').includes('json')?await r.json():await r.text();if(r.status===401){location.href='/login';throw new Error('Требуется вход')}if(!r.ok)throw new Error(d?.detail||d);return d}
 async function load(){
   const p=new URLSearchParams();
@@ -9,7 +9,7 @@ async function load(){
   let d={items:[]};
   try{
     d=await api('/api/pb-mng/coordinator/stops?'+p);
-    $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label)}</h3><p>${esc(x.violation.text)}</p><div class="meta"><span>${esc(x.contractor||x.location)}</span><b>${fmt(x.created_at)}</b></div></button>`).join(''):'<div class="empty">Нет карточек</div>';
+    $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label||'Не классифицировано')}</h3><p>${esc(x.violation.text||x.description||'Остановка работ')}</p><div class="meta"><span>${esc(x.contractor||x.location)}</span><b>${fmt(x.created_at)}</b></div></button>`).join(''):'<div class="empty">Нет карточек</div>';
     document.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openStop(b.dataset.id));
   }catch(e){
     $('#queue').innerHTML=`<div class="empty"><b>Не удалось загрузить очередь</b><br><small>${esc(e.message)}</small><br><button class="btn light" style="margin-top:12px" onclick="load()">Повторить</button></div>`;
@@ -52,20 +52,109 @@ function openPhotoGallery(phase,index=0){if(!selected)return;lightboxPhotos=(sel
 function renderLightbox(){const p=lightboxPhotos[lightboxIndex];if(!p)return;$('#lightboxImage').src=p.url;$('#lightboxCounter').textContent=`${lightboxIndex+1} из ${lightboxPhotos.length}`;$('#lightboxCaption').textContent=(p.original_name?p.original_name+' · ':'')+fmt(p.created_at);$('#lightboxThumbs').innerHTML=lightboxPhotos.map((x,i)=>`<button type="button" data-lightbox-index="${i}" class="${i===lightboxIndex?'active':''}"><img src="${x.url}" alt="Фото ${i+1}"></button>`).join('');document.querySelectorAll('[data-lightbox-index]').forEach(b=>b.onclick=()=>{lightboxIndex=Number(b.dataset.lightboxIndex);renderLightbox()});$('#lightboxPrev').style.visibility=lightboxPhotos.length>1?'visible':'hidden';$('#lightboxNext').style.visibility=lightboxPhotos.length>1?'visible':'hidden';}
 function closePhotoGallery(){$('#photoLightbox').classList.remove('open');$('#photoLightbox').setAttribute('aria-hidden','true');document.body.style.overflow='';$('#lightboxImage').removeAttribute('src');}
 if($('#lightboxClose'))$('#lightboxClose').onclick=closePhotoGallery;if($('#photoLightbox'))$('#photoLightbox').onclick=e=>{if(e.target===$('#photoLightbox'))closePhotoGallery()};if($('#lightboxPrev'))$('#lightboxPrev').onclick=()=>{if(!lightboxPhotos.length)return;lightboxIndex=(lightboxIndex-1+lightboxPhotos.length)%lightboxPhotos.length;renderLightbox()};if($('#lightboxNext'))$('#lightboxNext').onclick=()=>{if(!lightboxPhotos.length)return;lightboxIndex=(lightboxIndex+1)%lightboxPhotos.length;renderLightbox()};document.addEventListener('keydown',e=>{if(!$('#photoLightbox').classList.contains('open'))return;if(e.key==='Escape')closePhotoGallery();if(e.key==='ArrowLeft')$('#lightboxPrev').click();if(e.key==='ArrowRight')$('#lightboxNext').click();});
+
+function severityLabel(s){return (catalog?.severity_labels||{gross:'Грубое',significant:'Значительное',minor:'Незначительное'})[s]||s}
+function reviewRule(){return (catalog?.violations||[]).find(v=>v.id===reviewViolationId)||null}
+function reviewClassifierHtml(x){
+  reviewViolationId=x.violation?.id||'';
+  reviewSeverity=x.current_severity||'';
+  return `<div class="classifier-box">
+    <h4>Классификация нарушения</h4>
+    <div class="classifier-search-wrap">
+      <input class="classifier-search" id="reviewViolationSearch" autocomplete="off" placeholder="Поиск по классификатору: высота, СИЗ, ограждение, НД…">
+      <div class="classifier-results hidden" id="reviewViolationResults"></div>
+    </div>
+    <div class="classifier-selected ${reviewViolationId?'':'empty'}" id="reviewViolationSelected"></div>
+    <div class="classification-criteria" id="reviewSeverityArea"></div>
+  </div>`;
+}
+function renderReviewViolationResults(){
+  const root=$('#reviewViolationResults'); if(!root)return;
+  const q=($('#reviewViolationSearch')?.value||'').trim().toLocaleLowerCase('ru');
+  let rows=(catalog?.violations||[]);
+  if(q) rows=rows.filter(v=>[v.number,v.text,v.barrier,v.source].join(' ').toLocaleLowerCase('ru').includes(q));
+  rows=rows.slice(0,40);
+  if(!rows.length){root.innerHTML='<div class="empty" style="padding:14px">Ничего не найдено</div>';root.classList.remove('hidden');return;}
+  root.innerHTML=rows.map(v=>`<button type="button" class="classifier-result" data-review-violation="${esc(v.id)}"><b>${esc(v.number+'. '+v.text)}</b><small>${esc([v.source,v.barrier].filter(Boolean).join(' · '))}</small></button>`).join('');
+  root.classList.remove('hidden');
+  root.querySelectorAll('[data-review-violation]').forEach(b=>b.onclick=()=>selectReviewViolation(b.dataset.reviewViolation));
+}
+function selectReviewViolation(id){
+  reviewViolationId=id;reviewSeverity='';
+  if($('#reviewViolationSearch'))$('#reviewViolationSearch').value='';
+  if($('#reviewViolationResults'))$('#reviewViolationResults').classList.add('hidden');
+  renderReviewViolationSelected();
+}
+function renderReviewViolationSelected(){
+  const selectedBox=$('#reviewViolationSelected'),severityArea=$('#reviewSeverityArea'),rule=reviewRule();
+  if(!selectedBox||!severityArea)return;
+  if(!rule){
+    selectedBox.className='classifier-selected empty';
+    selectedBox.innerHTML='Нарушение ещё не классифицировано. Выберите пункт классификатора перед подтверждением.';
+    severityArea.innerHTML='';
+    return;
+  }
+  selectedBox.className='classifier-selected';
+  selectedBox.innerHTML=`<b>${esc(rule.number+'. '+rule.text)}</b><small>${esc([rule.source,rule.barrier].filter(Boolean).join(' · '))}</small>`;
+  const allowed=rule.severities||[];
+  if(allowed.length===1){
+    reviewSeverity=allowed[0];
+    severityArea.innerHTML=`<label>Категория<input value="${esc(severityLabel(reviewSeverity))}" disabled></label>${rule.criteria?.[reviewSeverity]?`<div class="criteria-note">${esc(rule.criteria[reviewSeverity])}</div>`:''}${rule.requires_context?`<label>Основание категории<textarea id="reviewSeverityContext" rows="2" placeholder="Укажите фактические условия"></textarea></label>`:''}`;
+  }else{
+    if(!allowed.includes(reviewSeverity))reviewSeverity='';
+    severityArea.innerHTML=`<label>Категория<select id="reviewSeverity"><option value="">Выберите категорию</option>${allowed.map(s=>`<option value="${esc(s)}" ${reviewSeverity===s?'selected':''}>${esc(severityLabel(s))}</option>`).join('')}</select></label><div class="criteria-note" id="reviewCriteriaNote"></div><label>Основание выбора<textarea id="reviewSeverityContext" rows="2" placeholder="Кратко укажите фактические условия"></textarea></label>`;
+    const sel=$('#reviewSeverity'); if(sel)sel.onchange=()=>{reviewSeverity=sel.value;const note=$('#reviewCriteriaNote');if(note)note.textContent=(rule.criteria||{})[reviewSeverity]||'';};
+    if(sel)sel.dispatchEvent(new Event('change'));
+  }
+}
+function bindReviewClassifier(){
+  const search=$('#reviewViolationSearch');
+  if(search){search.onfocus=renderReviewViolationResults;search.oninput=renderReviewViolationResults;}
+  document.addEventListener('click',e=>{const root=$('#reviewViolationResults');if(root&&!root.classList.contains('hidden')&&!e.target.closest('.classifier-search-wrap'))root.classList.add('hidden');},{once:true});
+  renderReviewViolationSelected();
+}
 function render(){const x=selected;if(!x)return;const canReview=['pending_verification','returned_for_revision'].includes(x.status),canResolution=x.status==='resolution_submitted',canPkm=x.pkm_required&&x.status==='awaiting_pkm',canCourse=x.course_status==='required'&&x.status==='awaiting_training',canUnblock=x.status==='ready_for_unblock';const measures=(catalog?.measures||[]).map(m=>`<label class="measure"><input type="checkbox" name="measure" value="${esc(m)}" ${m==='Работы остановлены до устранения'?'checked':''}><span>${esc(m)}</span></label>`).join('');const beforePhotos=photoBlock(x.photos,'violation','Материалы, направленные работником при остановке');const afterPhotos=photoBlock(x.photos,'resolution','Подтверждение устранения замечаний');
 let decision='';
-if(canReview){decision=`<div class="decision-card detail-anchor" id="decisionCard"><div class="decision-head"><div><h3>Решение координатора</h3><p>Проверьте материалы и выберите действие по остановке.</p></div><span class="status ${cls(x.status)}">${esc(x.status_label)}</span></div><label>Комментарий<textarea id="reviewNote" rows="2" placeholder="Комментарий; для возврата или отклонения — причина обязательна"></textarea></label><div class="action-row decision-actions"><button class="btn green" id="verify">✓ Подтвердить остановку</button><button class="btn light" id="return">↩ На доработку</button><button class="btn red" id="reject">✕ Отклонить</button></div><div class="review-grid"><label>Категория<select id="reviewSeverity"><option value="gross" ${x.current_severity==='gross'?'selected':''}>Грубое</option><option value="significant" ${x.current_severity==='significant'?'selected':''}>Значительное</option><option value="minor" ${x.current_severity==='minor'?'selected':''}>Незначительное</option></select></label><label>Назначить обучение<select id="reviewCourse"><option value="">Не назначать</option>${(catalog.courses||[]).map(c=>`<option>${esc(c)}</option>`).join('')}</select></label></div><div class="box"><h4>Меры воздействия</h4><div class="measures">${measures}</div></div><div class="review-grid"><div><label class="measure"><input id="pkmRequired" type="checkbox"><span>Требуется ПКМ</span></label><label class="measure"><input id="blockResponsible" type="checkbox"><span>Заблокировать пропуск ответственного</span></label></div><label>Срок блокировки, дней<input id="blockDays" type="number" min="1" max="365" placeholder="Пусто = до выполнения условий"></label></div></div>`;}
+if(canReview){decision=`<div class="decision-card detail-anchor" id="decisionCard"><div class="decision-head"><div><h3>Решение координатора</h3><p>Сначала классифицируйте нарушение, затем выберите меры и решение.</p></div><span class="status ${cls(x.status)}">${esc(x.status_label)}</span></div>${reviewClassifierHtml(x)}<label>Комментарий<textarea id="reviewNote" rows="2" placeholder="Комментарий; для возврата или отклонения — причина обязательна"></textarea></label><div class="review-grid"><label>Назначить обучение<select id="reviewCourse"><option value="">Не назначать</option>${(catalog?.courses||[]).map(c=>`<option>${esc(c)}</option>`).join('')}</select></label><label>Срок блокировки, дней<input id="blockDays" type="number" min="1" max="365" placeholder="Пусто = до выполнения условий"></label></div><div class="box"><h4>Меры воздействия</h4><div class="measures">${measures}</div></div><div class="review-grid"><div><label class="measure"><input id="pkmRequired" type="checkbox"><span>Требуется ПКМ</span></label><label class="measure"><input id="blockResponsible" type="checkbox"><span>Заблокировать пропуск ответственного</span></label></div></div><div class="action-row decision-actions"><button class="btn green" id="verify">✓ Подтвердить остановку</button><button class="btn light" id="return">↩ На доработку</button><button class="btn red" id="reject">✕ Отклонить</button></div></div>`;}
 else if(canResolution){decision=`<div class="decision-card"><div class="decision-head"><div><h3>Проверка устранения</h3><p>Работник направил подтверждение и фотографии после устранения.</p></div></div><div class="action-row decision-actions"><button class="btn green" id="acceptResolution">✓ Устранение подтверждено</button><button class="btn light" id="returnResolution">↩ Вернуть на доработку</button></div></div>`;}
 else if(canPkm){decision=`<div class="decision-card"><div class="decision-head"><div><h3>Проверка ПКМ</h3><p>Проверьте план корректирующих мероприятий.</p></div></div><label>Комментарий / сведения по ПКМ<textarea id="pkmText" rows="3">${esc(x.pkm_text||'')}</textarea></label><div class="action-row decision-actions"><button class="btn green" id="acceptPkm">✓ ПКМ принят</button><button class="btn light" id="returnPkm">↩ Вернуть ПКМ</button></div></div>`;}
 else if(canCourse){decision=`<div class="decision-card"><div class="decision-head"><div><h3>Обучение</h3><p>Назначен курс: <b>${esc(x.course_name)}</b></p></div></div><div class="action-row decision-actions"><button class="btn green" id="coursePassed">✓ Отметить курс пройденным</button></div></div>`;}
 else if(canUnblock){decision=`<div class="decision-card"><div class="decision-head"><div><h3>Все условия выполнены</h3><p>Устранение и назначенные меры подтверждены. Можно снять ограничение.</p></div></div><div class="action-row decision-actions"><button class="btn primary" id="unblock">Снять блокировку и закрыть остановку</button></div></div>`;}
-$('#detail').innerHTML=`<div class="detail-head"><div><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h2>${x.id}</h2></div><b>${esc(x.severity_label)}</b></div><div class="review-top">${beforePhotos}${decision||'<div class="box"><h4>Текущее состояние</h4><p>'+esc(x.status_label)+'</p></div>'}</div><div class="grid"><span>Дата/время</span><b>${fmt(x.occurred_at)}</b><span>Инициатор</span><b>${esc(x.initiator.name)} · ${esc(x.initiator.unit)}</b><span>Блок / СП</span><b>${esc(x.block)} / ${esc(x.structural_unit)}</b><span>Объект</span><b>${esc(x.field)} · ${esc(x.location)}</b><span>Подрядчик</span><b>${esc(x.contractor)}${x.subcontractor?' / '+esc(x.subcontractor):''}</b><span>Вид работ / НД</span><b>${esc(x.work_type)} ${esc(x.permit_number)}</b><span>Ответственный</span><b>${esc(x.responsible.fio)} · ${esc(x.responsible.pass)}</b></div><div class="box"><h4>Нарушение</h4><p>${esc(x.violation.text)}</p><p><b>Барьер:</b> ${esc(x.violation.barrier||'—')}</p><p><b>Описание:</b> ${esc(x.description)}</p>${x.severity_context?`<p><b>Основание категории:</b> ${esc(x.severity_context)}</p>`:''}</div>${(x.photos||[]).some(p=>p.phase==='resolution')?`<div class="photo-compare-title"><h3>Подтверждение устранения</h3><span>Фото после</span></div>${afterPhotos}`:''}${x.verification_note?`<div class="box"><h4>Комментарий координатора</h4><p>${esc(x.verification_note)}</p></div>`:''}${x.measures?.length?`<div class="box"><h4>Назначенные меры</h4><p>${x.measures.map(esc).join(' • ')}</p></div>`:''}<div class="box timeline"><h4>История действий</h4>${(x.actions||[]).map(a=>`<div><b>${fmt(a.at)}</b>${esc(a.actor_name)} · ${esc(a.action)}</div>`).join('')}</div>`;bindActions();bindPhotoGallery();}
+const classification=x.violation?.id?`<div class="box"><h4>Классификация координатора</h4><p>${esc(x.violation.text)}</p><p><b>Барьер:</b> ${esc(x.violation.barrier||'—')}</p><p><b>Категория:</b> ${esc(x.severity_label)}</p>${x.severity_context?`<p><b>Основание:</b> ${esc(x.severity_context)}</p>`:''}</div>`:'';
+$('#detail').innerHTML=`<div class="detail-head"><div><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h2>${x.id}</h2></div><b>${esc(x.severity_label||'Не классифицировано')}</b></div><div class="review-top">${beforePhotos}${decision||'<div class="box"><h4>Текущее состояние</h4><p>'+esc(x.status_label)+'</p></div>'}</div><div class="grid"><span>Дата/время</span><b>${fmt(x.occurred_at)}</b><span>Инициатор</span><b>${esc(x.initiator.name)} · ${esc(x.initiator.unit)}</b><span>Блок / СП</span><b>${esc(x.block)} / ${esc(x.structural_unit)}</b><span>Объект</span><b>${esc(x.field)} · ${esc(x.location)}</b><span>Подрядчик</span><b>${esc(x.contractor)}${x.subcontractor?' / '+esc(x.subcontractor):''}</b><span>Вид работ / НД</span><b>${esc(x.work_type)} ${esc(x.permit_number)}</b><span>Ответственный</span><b>${esc(x.responsible.fio)} · ${esc(x.responsible.pass)}</b></div><div class="box"><h4>Описание обстоятельств работником</h4><p>${esc(x.description||'—')}</p></div>${classification}${(x.photos||[]).some(p=>p.phase==='resolution')?`<div class="photo-compare-title"><h3>Подтверждение устранения</h3><span>Фото после</span></div>${afterPhotos}`:''}${x.verification_note?`<div class="box"><h4>Комментарий координатора</h4><p>${esc(x.verification_note)}</p></div>`:''}${x.measures?.length?`<div class="box"><h4>Назначенные меры</h4><p>${x.measures.map(esc).join(' • ')}</p></div>`:''}<div class="box timeline"><h4>История действий</h4>${(x.actions||[]).map(a=>`<div><b>${fmt(a.at)}</b>${esc(a.actor_name)} · ${esc(a.action)}</div>`).join('')}</div>`;
+bindActions();bindPhotoGallery();if(canReview)bindReviewClassifier();}
 function bindActions(){if($('#verify'))$('#verify').onclick=()=>review('verify');if($('#return'))$('#return').onclick=()=>review('return_for_revision');if($('#reject'))$('#reject').onclick=()=>review('reject');if($('#acceptResolution'))$('#acceptResolution').onclick=()=>resolution('accept');if($('#returnResolution'))$('#returnResolution').onclick=()=>resolution('return');if($('#acceptPkm'))$('#acceptPkm').onclick=()=>pkm('accept');if($('#returnPkm'))$('#returnPkm').onclick=()=>pkm('return');if($('#coursePassed'))$('#coursePassed').onclick=coursePassed;if($('#unblock'))$('#unblock').onclick=unblock;}
-async function review(action){const note=$('#reviewNote')?.value||'';if(['return_for_revision','reject'].includes(action)&&!note.trim()){alert('Укажите причину');return}const payload={action,note,severity:$('#reviewSeverity')?.value||'',measures:[...document.querySelectorAll('input[name="measure"]:checked')].map(x=>x.value),course_name:$('#reviewCourse')?.value||'',pkm_required:!!$('#pkmRequired')?.checked,block_responsible:!!$('#blockResponsible')?.checked,block_days:$('#blockDays')?.value?Number($('#blockDays').value):null};selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/review`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});render();load()}
+async function review(action){const note=$('#reviewNote')?.value||'';if(['return_for_revision','reject'].includes(action)&&!note.trim()){alert('Укажите причину');return}if(action==='verify'&&!reviewViolationId){alert('Выберите нарушение из классификатора');return}const rule=reviewRule();if(action==='verify'&&rule&&(rule.severities||[]).length>1&&!reviewSeverity){alert('Выберите категорию нарушения');return}const payload={action,note,violation_id:reviewViolationId,severity:reviewSeverity,severity_context:$('#reviewSeverityContext')?.value||'',measures:[...document.querySelectorAll('input[name="measure"]:checked')].map(x=>x.value),course_name:$('#reviewCourse')?.value||'',pkm_required:!!$('#pkmRequired')?.checked,block_responsible:!!$('#blockResponsible')?.checked,block_days:$('#blockDays')?.value?Number($('#blockDays').value):null};selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/review`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});render();load();if(!$('#registryPanel').classList.contains('hidden'))loadRegistry()}
 async function resolution(action){const note=prompt(action==='return'?'Что необходимо доработать?':'Комментарий (необязательно)')||'';selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/resolution-review`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,note})});render();load()}
 async function pkm(action){selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/pkm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,text:$('#pkmText')?.value||''})});render();load()}
 async function coursePassed(){selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/course-passed`,{method:'POST'});render();load()}
 async function unblock(){if(!confirm('Снять блокировку пропуска и закрыть остановку?'))return;selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/unblock`,{method:'POST'});render();load()}
+
+function showServerTab(name){
+  document.querySelectorAll('[data-server-tab]').forEach(b=>b.classList.toggle('active',b.dataset.serverTab===name));
+  $('#verificationPanel').classList.toggle('hidden',name!=='verification');
+  $('#registryPanel').classList.toggle('hidden',name!=='registry');
+  if(name==='registry')loadRegistry();
+}
+async function loadRegistry(){
+  const p=new URLSearchParams({limit:'1000'});
+  const q=$('#registrySearch')?.value||'',status=$('#registryStatus')?.value||'',severity=$('#registrySeverity')?.value||'',from=$('#registryFrom')?.value||'',to=$('#registryTo')?.value||'';
+  if(q)p.set('q',q);if(status)p.set('status',status);if(severity)p.set('severity',severity);if(from)p.set('date_from',from);if(to)p.set('date_to',to);
+  const body=$('#registryBody');if(!body)return;
+  try{
+    const d=await api('/api/pb-mng/coordinator/stops?'+p);
+    body.innerHTML=d.items.length?d.items.map(x=>`<tr data-registry-stop="${esc(x.id)}"><td><div class="registry-main">${esc(x.id)}</div><div class="registry-sub">${fmt(x.occurred_at)}</div></td><td><span class="status ${cls(x.status)}">${esc(x.status_label)}</span></td><td>${esc(x.severity_label||'Не классифицировано')}</td><td><div class="registry-main">${esc(x.block||'—')}</div><div class="registry-sub">${esc(x.structural_unit||'')}</div></td><td><div class="registry-main">${esc(x.field||'—')}</div><div class="registry-sub">${esc(x.location||'')}</div></td><td>${esc(x.contractor||'—')}</td><td><div class="registry-main">${esc(x.work_type||'—')}</div><div class="registry-sub">${esc(x.permit_number||'')}</div></td><td><div class="registry-main">${esc(x.violation.text||'Не классифицировано')}</div><div class="registry-sub">${esc(x.description||'')}</div></td><td><div class="registry-main">${esc(x.responsible.fio||'—')}</div><div class="registry-sub">${esc(x.responsible.pass||'')}</div></td><td><div class="registry-main">${esc(x.initiator.name||'—')}</div><div class="registry-sub">${esc(x.initiator.unit||'')}</div></td></tr>`).join(''):'<tr><td colspan="10" class="empty">По выбранным фильтрам остановок нет</td></tr>';
+    body.querySelectorAll('[data-registry-stop]').forEach(row=>row.onclick=async()=>{showServerTab('verification');await openStop(row.dataset.registryStop);});
+  }catch(e){body.innerHTML=`<tr><td colspan="10" class="empty">Не удалось загрузить реестр: ${esc(e.message)}</td></tr>`;}
+}
+document.querySelectorAll('[data-server-tab]').forEach(b=>b.onclick=()=>showServerTab(b.dataset.serverTab));
+if($('#registryRefresh'))$('#registryRefresh').onclick=loadRegistry;
+if($('#registryStatus'))$('#registryStatus').onchange=loadRegistry;
+if($('#registrySeverity'))$('#registrySeverity').onchange=loadRegistry;
+if($('#registryFrom'))$('#registryFrom').onchange=loadRegistry;
+if($('#registryTo'))$('#registryTo').onchange=loadRegistry;
+let registryTimer;if($('#registrySearch'))$('#registrySearch').oninput=()=>{clearTimeout(registryTimer);registryTimer=setTimeout(loadRegistry,300)};
+
 async function loadRoutes(){try{const d=await api('/api/pb-mng/coordinator/email-routes');$('#routeList').innerHTML=d.items.map(x=>`<div><span>${esc(x.block||'Все блоки')}</span><span>${esc(x.contractor||'Все подрядчики')}</span><span>${esc(x.role)} · ${esc(x.recipient_name)}</span><b>${esc(x.email)}</b></div>`).join('')||'<p>Дополнительные адресаты пока не настроены.</p>'}catch(e){$('#routeList').innerHTML='<p class="notice">Email-маршрутизация временно недоступна: '+esc(e.message)+'</p>'}}
 $('#addRoute').onclick=async()=>{try{await api('/api/pb-mng/coordinator/email-routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({block:$('#rBlock').value,contractor:$('#rContractor').value,role:$('#rRole').value,recipient_name:$('#rName').value,email:$('#rEmail').value})});$('#rEmail').value='';loadRoutes()}catch(e){alert(e.message)}};$('#refresh').onclick=load;$('#statusFilter').onchange=load;$('#severityFilter').onchange=load;let timer;$('#search').oninput=()=>{clearTimeout(timer);timer=setTimeout(load,350)};async function startCoordinator(){
   try{await load();}catch(e){
