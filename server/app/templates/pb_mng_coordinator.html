@@ -65,10 +65,12 @@
 .queue-toolbar{position:sticky;top:76px;z-index:8;box-shadow:0 5px 18px rgba(29,52,82,.04)}.queue-item{position:relative}.queue-item h3{padding-right:10px}.queue-item p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.queue-item.active:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--blue)}
 .settings-intro{background:white;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:12px}.settings-intro h2{margin:0 0 5px}.settings-intro p{margin:0;color:var(--muted);font-size:12px}.settings-intro+.routes{margin-top:0}
 @media(max-width:1250px){.workflow-stages{grid-template-columns:repeat(3,1fr)}}@media(max-width:900px){.summary-cards{grid-template-columns:repeat(2,1fr)}.workflow-stages{grid-template-columns:repeat(2,1fr)}}
+
+.next-action{display:flex;align-items:flex-start;gap:10px;border-radius:12px;padding:11px 13px;margin:12px 0;background:#f3f7fd;border:1px solid #dce7f6}.next-action-icon{width:28px;height:28px;border-radius:9px;background:#e3edfb;color:var(--navy);display:grid;place-items:center;font-weight:900;flex:0 0 auto}.next-action b{display:block;font-size:12px}.next-action p{margin:3px 0 0;color:var(--muted);font-size:10px;line-height:1.35}.next-action.worker{background:#fff9ed;border-color:#edd8aa}.next-action.worker .next-action-icon{background:#fff0cf;color:#9a6100}.next-action.done{background:#f0faf4;border-color:#d1eadb}.next-action.done .next-action-icon{background:#def3e7;color:#177247}
 </style>
 </head>
 <body>
-<header class="top"><div class="logo">ПБ</div><div class="title"><b>ПБ_МНГ · Координатор остановок</b><span>Верификация → меры → устранение → разблокировка · Версия координатора 20260925-7</span></div><div class="user">{{ operator.username }} <a href="/dashboard">Панель РПО</a></div></header>
+<header class="top"><div class="logo">ПБ</div><div class="title"><b>ПБ_МНГ · Координатор остановок</b><span>Верификация → меры → устранение → разблокировка · Версия координатора 20260925-8</span></div><div class="user">{{ operator.username }} <a href="/dashboard">Панель РПО</a></div></header>
 <main class="wrap">
 <nav class="server-tabs">
   <button class="server-tab active" type="button" data-server-tab="verification">Рабочая очередь</button>
@@ -136,5 +138,5 @@
     <div class="photo-lightbox-footer"><div><b id="lightboxCounter"></b><div id="lightboxCaption"></div></div><div class="photo-lightbox-thumbs" id="lightboxThumbs"></div></div>
   </div>
 </div>
-<script src="/pb-mng/coordinator.js?v=20260925-7" defer></script>
+<script src="/pb-mng/coordinator.js?v=20260925-8" defer></script>
 </body></html>
