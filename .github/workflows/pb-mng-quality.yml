@@ -35,21 +35,17 @@ jobs:
         run: |
           node --check server/app/pb_mng/app.js
           node --check server/app/pb_mng/sw.js
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          src = Path('server/app/templates/pb_mng_coordinator.html').read_text(encoding='utf-8')
-          scripts = re.findall(r'<script>(.*?)</script>', src, flags=re.S)
-          assert scripts, 'Coordinator script not found'
-          Path('/tmp/pb-coordinator.js').write_text(scripts[-1], encoding='utf-8')
-          PY
-          node --check /tmp/pb-coordinator.js
+          node --check server/app/pb_mng/coordinator.js
           python - <<'PY'
           from pathlib import Path
           src = Path('server/app/templates/pb_mng_coordinator.html').read_text(encoding='utf-8')
-          assert src.index('id="photoLightbox"') < src.index('<script>'), 'photoLightbox must be before coordinator script'
-          assert 'async function load(){' in src
-          print('Coordinator DOM startup order OK')
+          assert '/pb-mng/coordinator.js?v=20260925-5' in src
+          assert 'Версия координатора 20260925-5' in src
+          assert '<script>' not in src
+          js = Path('server/app/pb_mng/coordinator.js').read_text(encoding='utf-8')
+          assert 'startCoordinator()' in js
+          assert 'async function load()' in js
+          print('External coordinator runtime contract OK')
           PY
       - name: Run PB_MNG workflow test
         run: python -m unittest server.tests.test_pb_mng_workflow -v
