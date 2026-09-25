@@ -473,7 +473,7 @@ def resubmit_stop(public_id: str, request: Request, payload_json: str = Form(...
 @router.post("/api/pb-mng/stops/{public_id}/resolution")
 def submit_resolution(public_id: str, request: Request, comment: str = Form(""), photos: list[UploadFile] = File(default=[]), db: Session = Depends(get_db)):
     stop = _find_own_stop(db, public_id, request)
-    if stop.status not in {"awaiting_resolution", "resolution_revision", "awaiting_pkm"}:
+    if stop.status not in {"awaiting_resolution", "resolution_revision"}:
         raise HTTPException(status_code=409, detail="Для этой остановки сейчас не ожидается подтверждение устранения")
     count = _save_photos(db, stop, photos, "resolution")
     if count == 0:
@@ -502,6 +502,21 @@ def mobile_photo(photo_id: int, request: Request, db: Session = Depends(get_db))
     if not path.exists():
         raise HTTPException(status_code=404, detail="Файл фото не найден")
     return FileResponse(path, media_type=photo.mime_type, headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.post("/api/pb-mng/stops/{public_id}/pkm")
+def submit_pkm(public_id: str, request: Request, text: str = Form(...), db: Session = Depends(get_db)):
+    stop = _find_own_stop(db, public_id, request)
+    if not stop.pkm_required or stop.status != "awaiting_pkm" or stop.pkm_status not in {"required", "revision"}:
+        raise HTTPException(status_code=409, detail="ПКМ сейчас не ожидается")
+    stop.pkm_text = _clean(text, 10000)
+    if not stop.pkm_text:
+        raise HTTPException(status_code=400, detail="Добавьте описание плана корректирующих мероприятий")
+    stop.pkm_status = "submitted"
+    stop.updated_at = utcnow()
+    _audit(db, stop, "worker", stop.initiator_name, "pkm_submitted", {})
+    db.commit()
+    return _stop_out(stop, db, include_actions=True)
 
 
 @router.get("/pb-mng/coordinator/", response_class=HTMLResponse, include_in_schema=False)
@@ -626,18 +641,20 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
         stop.current_severity = severity
         stop.status = "awaiting_resolution"
         stop.verification_note = _clean(payload.note, 5000)
-        stop.measures_json = json.dumps(payload.measures or _recommended_measures(severity), ensure_ascii=False)
+        selected_measures = payload.measures or _recommended_measures(severity)
+        stop.measures_json = json.dumps(selected_measures, ensure_ascii=False)
         stop.course_name = _clean(payload.course_name, 300)
         stop.course_status = "required" if stop.course_name and "НЕ ТРЕБУЕТ" not in stop.course_name.upper() else "not_required"
         stop.pkm_required = bool(payload.pkm_required)
         stop.pkm_status = "required" if stop.pkm_required else "not_required"
         stop.verified_at = utcnow()
         stop.verified_by_id = operator.id
-        if payload.block_responsible and stop.responsible_pass:
+        should_block = bool(payload.block_responsible) or any("СТОП-ЛИСТ" in str(m).upper() for m in selected_measures)
+        if should_block and stop.responsible_pass:
             ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
             stop.block_until = ends_at
             db.add(PbAccessRestriction(stop_id=stop.id, pass_number=normalize_pass_number(stop.responsible_pass) or stop.responsible_pass, fio=stop.responsible_fio, restriction_kind="personnel", reason=stop.violation_text, ends_at=ends_at, active=True))
-        _audit(db, stop, "coordinator", operator.username, "verified", {"severity": severity, "measures": _json(stop.measures_json, []), "block": bool(payload.block_responsible)})
+        _audit(db, stop, "coordinator", operator.username, "verified", {"severity": severity, "measures": _json(stop.measures_json, []), "block": bool(should_block)})
         _notify_verified(db, stop)
     else:
         raise HTTPException(status_code=400, detail="Неизвестное решение координатора")
@@ -702,6 +719,20 @@ def review_pkm(public_id: str, payload: PkmPayload, db: Session = Depends(get_db
     return _stop_out(stop, db, include_actions=True)
 
 
+@router.post("/api/pb-mng/coordinator/stops/{public_id}/course-passed")
+def course_passed(public_id: str, db: Session = Depends(get_db), operator: Operator = Depends(coordinator_operator)):
+    stop = db.scalar(select(PbStop).where(PbStop.public_id == public_id))
+    if not stop:
+        raise HTTPException(status_code=404, detail="Остановка не найдена")
+    if stop.course_status != "required":
+        raise HTTPException(status_code=409, detail="Для остановки нет ожидающего курса")
+    stop.course_status = "passed"
+    stop.updated_at = utcnow()
+    _audit(db, stop, "coordinator", operator.username, "course_passed", {"course": stop.course_name})
+    db.commit()
+    return _stop_out(stop, db, include_actions=True)
+
+
 @router.post("/api/pb-mng/coordinator/stops/{public_id}/unblock")
 def unblock(public_id: str, db: Session = Depends(get_db), operator: Operator = Depends(coordinator_operator)):
     stop = db.scalar(select(PbStop).where(PbStop.public_id == public_id))
@@ -711,6 +742,8 @@ def unblock(public_id: str, db: Session = Depends(get_db), operator: Operator = 
         raise HTTPException(status_code=409, detail="Сначала подтвердите устранение нарушения")
     if stop.pkm_required and stop.pkm_status != "accepted":
         raise HTTPException(status_code=409, detail="Сначала подтвердите выполнение ПКМ")
+    if stop.course_status == "required":
+        raise HTTPException(status_code=409, detail="Сначала подтвердите прохождение назначенного курса")
     for restriction in stop.restrictions:
         if restriction.active:
             restriction.active = False
