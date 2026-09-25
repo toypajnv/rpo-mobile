@@ -42,10 +42,7 @@ class PbMngWorkflowTests(unittest.TestCase):
                 "contractor": "ООО Тест",
                 "work_type": catalog["work_types"][0],
                 "permit_number": "НД-123",
-                "violation_id": rule["id"],
-                "severity": rule["severities"][0],
-                "severity_context": "",
-                "description": "Тестовая остановка",
+                "description": "Тестовая остановка без классификации работником",
                 "responsible": {"fio": "Петров Петр Петрович", "position": "Мастер", "pass": "12345С"},
             }
             created = client.post(
@@ -57,6 +54,8 @@ class PbMngWorkflowTests(unittest.TestCase):
             self.assertEqual(created.status_code, 201, created.text)
             stop_id = created.json()["id"]
             self.assertEqual(created.json()["status"], "pending_verification")
+            self.assertEqual(created.json()["violation"]["id"], "")
+            self.assertEqual(created.json()["severity_label"], "Не классифицировано")
 
             own = client.get("/api/pb-mng/my-stops", headers=self.headers())
             self.assertEqual(own.status_code, 200, own.text)
@@ -70,7 +69,9 @@ class PbMngWorkflowTests(unittest.TestCase):
                 json={
                     "action": "verify",
                     "note": "Подтверждено",
+                    "violation_id": rule["id"],
                     "severity": rule["severities"][0],
+                    "severity_context": "",
                     "measures": ["Работы остановлены до устранения", "Внесен в СТОП-ЛИСТ"],
                     "course_name": "",
                     "pkm_required": False,
@@ -80,7 +81,17 @@ class PbMngWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(reviewed.status_code, 200, reviewed.text)
             self.assertEqual(reviewed.json()["status"], "awaiting_resolution")
+            self.assertEqual(reviewed.json()["violation"]["id"], rule["id"])
+            self.assertEqual(reviewed.json()["current_severity"], rule["severities"][0])
             self.assertTrue(reviewed.json()["restrictions"])
+
+            registry = client.get("/api/pb-mng/coordinator/stops", params={"q": stop_id, "limit": 1000})
+            self.assertEqual(registry.status_code, 200, registry.text)
+            self.assertEqual(registry.json()["items"][0]["id"], stop_id)
+
+            coordinator_page = client.get("/pb-mng/coordinator/")
+            self.assertEqual(coordinator_page.status_code, 200, coordinator_page.text)
+            self.assertIn("Реестр остановок", coordinator_page.text)
 
             resolution = client.post(
                 f"/api/pb-mng/stops/{stop_id}/resolution",
