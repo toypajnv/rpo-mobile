@@ -52,6 +52,7 @@ STATUS_LABELS = {
     "resolution_submitted": "Устранение заявлено",
     "resolution_revision": "Устранение требует доработки",
     "awaiting_pkm": "Ожидается ПКМ",
+    "awaiting_training": "Ожидается обучение",
     "ready_for_unblock": "Готово к снятию блокировки",
     "closed": "Закрыта",
 }
@@ -59,6 +60,14 @@ STATUS_LABELS = {
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _json(value: str | None, default: Any) -> Any:
@@ -157,7 +166,8 @@ def _effective_severity(stop: PbStop, db: Session, *, record_action: bool = True
         return stop.current_severity
     if stop.status in {"rejected", "closed", "resolution_submitted", "ready_for_unblock"}:
         return stop.current_severity
-    if utcnow() < stop.occurred_at + timedelta(minutes=60):
+    occurred_at = _as_utc(stop.occurred_at) or utcnow()
+    if utcnow() < occurred_at + timedelta(minutes=60):
         return stop.current_severity
     stop.current_severity = "significant"
     stop.updated_at = utcnow()
@@ -190,7 +200,7 @@ def _photo_out(photo: PbPhoto) -> dict:
 
 def _stop_out(stop: PbStop, db: Session, *, include_actions: bool = False) -> dict:
     _effective_severity(stop, db)
-    active_restrictions = [r for r in stop.restrictions if r.active and (r.ends_at is None or r.ends_at > utcnow())]
+    active_restrictions = [r for r in stop.restrictions if r.active and (r.ends_at is None or (_as_utc(r.ends_at) or utcnow()) > utcnow())]
     result = {
         "id": stop.public_id,
         "initiator": {"name": stop.initiator_name, "unit": stop.initiator_unit, "pass": stop.initiator_pass},
@@ -327,6 +337,15 @@ class ReviewPayload(BaseModel):
     pkm_required: bool = False
     block_responsible: bool = False
     block_days: int | None = Field(default=None, ge=1, le=365)
+
+
+def _next_after_conditions(stop: PbStop) -> str:
+    if stop.pkm_required and stop.pkm_status != "accepted":
+        return "awaiting_pkm"
+    if stop.course_status == "required":
+        return "awaiting_training"
+    has_active = any(r.active and (r.ends_at is None or (_as_utc(r.ends_at) or utcnow()) > utcnow()) for r in stop.restrictions)
+    return "ready_for_unblock" if has_active else "closed"
 
 
 class ResolutionReviewPayload(BaseModel):
@@ -677,13 +696,9 @@ def review_resolution(public_id: str, payload: ResolutionReviewPayload, db: Sess
         _audit(db, stop, "coordinator", operator.username, "resolution_returned", {"note": stop.verification_note})
     elif payload.action == "accept":
         stop.resolution_confirmed_at = utcnow()
-        if stop.pkm_required and stop.pkm_status != "accepted":
-            stop.status = "awaiting_pkm"
-        else:
-            has_active = any(r.active and (r.ends_at is None or r.ends_at > utcnow()) for r in stop.restrictions)
-            stop.status = "ready_for_unblock" if has_active else "closed"
-            if stop.status == "closed":
-                stop.closed_at = utcnow()
+        stop.status = _next_after_conditions(stop)
+        if stop.status == "closed":
+            stop.closed_at = utcnow()
         _audit(db, stop, "coordinator", operator.username, "resolution_accepted", {"next_status": stop.status})
     else:
         raise HTTPException(status_code=400, detail="Неизвестное решение")
@@ -702,9 +717,8 @@ def review_pkm(public_id: str, payload: PkmPayload, db: Session = Depends(get_db
     stop.pkm_text = _clean(payload.text, 10000)
     if payload.action == "accept":
         stop.pkm_status = "accepted"
-        has_active = any(r.active and (r.ends_at is None or r.ends_at > utcnow()) for r in stop.restrictions)
         if stop.resolution_confirmed_at:
-            stop.status = "ready_for_unblock" if has_active else "closed"
+            stop.status = _next_after_conditions(stop)
             if stop.status == "closed":
                 stop.closed_at = utcnow()
         _audit(db, stop, "coordinator", operator.username, "pkm_accepted", {})
@@ -727,8 +741,12 @@ def course_passed(public_id: str, db: Session = Depends(get_db), operator: Opera
     if stop.course_status != "required":
         raise HTTPException(status_code=409, detail="Для остановки нет ожидающего курса")
     stop.course_status = "passed"
+    if stop.resolution_confirmed_at and (not stop.pkm_required or stop.pkm_status == "accepted"):
+        stop.status = _next_after_conditions(stop)
+        if stop.status == "closed":
+            stop.closed_at = utcnow()
     stop.updated_at = utcnow()
-    _audit(db, stop, "coordinator", operator.username, "course_passed", {"course": stop.course_name})
+    _audit(db, stop, "coordinator", operator.username, "course_passed", {"course": stop.course_name, "next_status": stop.status})
     db.commit()
     return _stop_out(stop, db, include_actions=True)
 
@@ -805,7 +823,7 @@ def export_stops(db: Session = Depends(get_db), operator: Operator = Depends(coo
         cell.alignment = Alignment(wrap_text=True, vertical="center")
     for stop in rows:
         _effective_severity(stop, db)
-        restriction_active = any(r.active and (r.ends_at is None or r.ends_at > utcnow()) for r in stop.restrictions)
+        restriction_active = any(r.active and (r.ends_at is None or (_as_utc(r.ends_at) or utcnow()) > utcnow()) for r in stop.restrictions)
         dt = stop.occurred_at.astimezone()
         closed = stop.closed_at.astimezone() if stop.closed_at else None
         ws.append([
