@@ -10,7 +10,7 @@
   <title>ПБ_МНГ</title>
   <link rel="manifest" href="/pb-mng/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/pb-mng/icon-180.png">
-  <link rel="stylesheet" href="/pb-mng/app.css?v=20260925-3">
+  <link rel="stylesheet" href="/pb-mng/app.css?v=20260925-4">
   <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/pb-mng/sw.js',{scope:'/pb-mng/'}).then(r=>r.update()).catch(()=>{});}</script>
 </head>
 <body>
@@ -55,8 +55,13 @@
       </div>
 
       <div class="form-card">
-        <label>Выявленное нарушение<select id="violation" required><option value="">Загрузка классификатора…</option></select></label>
-        <div class="violation-preview hidden" id="violationPreview"><small>Барьер / источник</small><b id="barrierText"></b></div>
+        <label>Выявленное нарушение
+          <input id="violation" type="hidden">
+          <button class="violation-picker-button" id="violationPickerButton" type="button">
+            <span><b id="violationPickerTitle">Выберите нарушение</b><small id="violationPickerHint">Поиск или выбор по разделам классификатора</small></span><i>›</i>
+          </button>
+        </label>
+        <div class="violation-preview hidden" id="violationPreview"><small>Раздел / барьер</small><b id="barrierText"></b></div>
         <div class="classification hidden" id="classification"><span>Категория</span><b id="levelText">—</b></div>
         <div class="criteria-box hidden" id="criteriaBox"><b>Уточните условие</b><div id="severityChoices"></div><label>Комментарий к выбору<textarea id="severityContext" rows="2" placeholder="Кратко укажите фактические условия"></textarea></label></div>
         <label>Описание обстоятельств<textarea id="description" rows="4" required placeholder="Что выявлено и почему работа остановлена"></textarea></label>
@@ -137,7 +142,20 @@
   <button data-open="myStops"><span>▤</span>Мои</button>
   <button data-open="profile"><span>○</span>Профиль</button>
 </nav>
+<div class="violation-picker hidden" id="violationPicker" role="dialog" aria-modal="true" aria-label="Выбор нарушения">
+  <div class="violation-picker-sheet">
+    <div class="violation-picker-head">
+      <button type="button" class="picker-close" id="closeViolationPicker">‹</button>
+      <div><small>Классификатор нарушений</small><h2>Выберите нарушение</h2></div>
+    </div>
+    <div class="violation-picker-tools">
+      <input id="violationSearch" type="search" placeholder="Поиск: СИЗ, высота, ограждение, опоры…">
+      <div class="violation-source-tabs" id="violationSourceTabs"></div>
+    </div>
+    <div class="violation-picker-results" id="violationPickerResults"></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
-<script src="/pb-mng/app.js?v=20260925-3" defer></script>
+<script src="/pb-mng/app.js?v=20260925-4" defer></script>
 </body>
 </html>
