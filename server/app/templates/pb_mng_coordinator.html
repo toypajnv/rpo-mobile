@@ -37,10 +37,58 @@
 <div class="layout"><section class="panel queue" id="queue"></section><section class="panel detail" id="detail"><div class="empty">Выберите остановку слева</div></section></div>
 <section class="routes"><h3>Email-маршрутизация</h3><p class="notice">В исходных данных были ФИО/роли ЕОЛ, но не email-адреса. Добавьте адреса здесь — после этого подтверждённые остановки автоматически будут направляться по совпадению блока/подрядчика. Общий адрес остановок уже используется системой.</p><div class="route-form"><input id="rBlock" placeholder="Блок (необязательно)"><input id="rContractor" placeholder="Подрядчик (необязательно)"><input id="rRole" placeholder="Роль: ЕОЛ / ЗГД" value="ЕОЛ"><input id="rName" placeholder="ФИО"><input id="rEmail" placeholder="email@company.ru"><button class="btn primary" id="addRoute">Добавить</button></div><div class="route-list" id="routeList"></div></section>
 </main>
+<div class="photo-lightbox" id="photoLightbox" aria-hidden="true">
+  <div class="photo-lightbox-inner">
+    <div class="photo-lightbox-head"><b id="lightboxTitle">Фотоматериалы</b><button class="photo-lightbox-close" id="lightboxClose" type="button">×</button></div>
+    <div class="photo-lightbox-stage"><button class="photo-lightbox-nav prev" id="lightboxPrev" type="button">‹</button><img id="lightboxImage" alt="Фотоматериал"><button class="photo-lightbox-nav next" id="lightboxNext" type="button">›</button></div>
+    <div class="photo-lightbox-footer"><div><b id="lightboxCounter"></b><div id="lightboxCaption"></div></div><div class="photo-lightbox-thumbs" id="lightboxThumbs"></div></div>
+  </div>
+</div>
 <script>
 const $=s=>document.querySelector(s);let selected=null,catalog=null;
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function fmt(v){if(!v)return'';return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(v))}function cls(s){if(s==='closed')return'green';if(s==='rejected')return'red';if(['pending_verification','resolution_submitted'].includes(s))return'blue';return'amber'}async function api(url,opts={}){const r=await fetch(url,opts);const d=(r.headers.get('content-type')||'').includes('json')?await r.json():await r.text();if(r.status===401){location.href='/login';throw new Error('Требуется вход')}if(!r.ok)throw new Error(d?.detail||d);return d}
-async function load(){const p=new URLSearchParams();if($('#statusFilter').value)p.set('status',$('#statusFilter').value);if($('#severityFilter').value)p.set('severity',$('#severityFilter').value);if($('#search').value)p.set('q',$('#search').value);const [d,s,c]=await Promise.all([api('/api/pb-mng/coordinator/stops?'+p),api('/api/pb-mng/coordinator/stats'),catalog?Promise.resolve(catalog):api('/api/pb-mng/catalog')]);catalog=c;$('#sPending').textContent=s.pending;$('#sActive').textContent=s.active;$('#sGross').textContent=s.by_severity.gross;$('#sSignificant').textContent=s.by_severity.significant;$('#sClosed').textContent=s.closed;$('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label)}</h3><p>${esc(x.violation.text)}</p><div class="meta"><span>${esc(x.contractor||x.location)}</span><b>${fmt(x.created_at)}</b></div></button>`).join(''):'<div class="empty">Нет карточек</div>';document.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openStop(b.dataset.id));const requested=new URLSearchParams(location.search).get('stop');if(!selected&&requested){try{selected=await api('/api/pb-mng/coordinator/stops/'+encodeURIComponent(requested));render();}catch{}}if(!selected&&d.items.length){selected=await api('/api/pb-mng/coordinator/stops/'+encodeURIComponent(d.items[0].id));render();}highlightSelected();}
+async function load(){
+  const p=new URLSearchParams();
+  if($('#statusFilter').value)p.set('status',$('#statusFilter').value);
+  if($('#severityFilter').value)p.set('severity',$('#severityFilter').value);
+  if($('#search').value)p.set('q',$('#search').value);
+
+  let d={items:[]};
+  try{
+    d=await api('/api/pb-mng/coordinator/stops?'+p);
+    $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label)}</h3><p>${esc(x.violation.text)}</p><div class="meta"><span>${esc(x.contractor||x.location)}</span><b>${fmt(x.created_at)}</b></div></button>`).join(''):'<div class="empty">Нет карточек</div>';
+    document.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openStop(b.dataset.id));
+  }catch(e){
+    $('#queue').innerHTML=`<div class="empty"><b>Не удалось загрузить очередь</b><br><small>${esc(e.message)}</small><br><button class="btn light" style="margin-top:12px" onclick="load()">Повторить</button></div>`;
+  }
+
+  try{
+    const s=await api('/api/pb-mng/coordinator/stats');
+    $('#sPending').textContent=s.pending;
+    $('#sActive').textContent=s.active;
+    $('#sGross').textContent=s.by_severity.gross;
+    $('#sSignificant').textContent=s.by_severity.significant;
+    $('#sClosed').textContent=s.closed;
+  }catch(e){
+    console.warn('PB_MNG stats:',e);
+  }
+
+  if(!catalog){
+    try{catalog=await api('/api/pb-mng/catalog');}
+    catch(e){console.warn('PB_MNG catalog:',e);}
+  }
+
+  const requested=new URLSearchParams(location.search).get('stop');
+  if(!selected&&requested){
+    try{selected=await api('/api/pb-mng/coordinator/stops/'+encodeURIComponent(requested));render();}
+    catch(e){console.warn('PB_MNG requested stop:',e);}
+  }
+  if(!selected&&d.items.length){
+    try{selected=await api('/api/pb-mng/coordinator/stops/'+encodeURIComponent(d.items[0].id));render();}
+    catch(e){console.warn('PB_MNG first stop:',e);}
+  }
+  highlightSelected();
+}
 function highlightSelected(){document.querySelectorAll('.queue-item').forEach(b=>b.classList.toggle('active',!!selected&&b.dataset.id===selected.id));}
 async function openStop(id){selected=await api('/api/pb-mng/coordinator/stops/'+encodeURIComponent(id));render();highlightSelected();}
 let lightboxPhotos=[],lightboxIndex=0;
@@ -50,7 +98,7 @@ function bindPhotoGallery(){document.querySelectorAll('[data-photo-phase]').forE
 function openPhotoGallery(phase,index=0){if(!selected)return;lightboxPhotos=(selected.photos||[]).filter(p=>p.phase===phase);if(!lightboxPhotos.length)return;lightboxIndex=Math.max(0,Math.min(index,lightboxPhotos.length-1));$('#lightboxTitle').textContent=photoPhaseTitle(phase);$('#photoLightbox').classList.add('open');$('#photoLightbox').setAttribute('aria-hidden','false');document.body.style.overflow='hidden';renderLightbox();}
 function renderLightbox(){const p=lightboxPhotos[lightboxIndex];if(!p)return;$('#lightboxImage').src=p.url;$('#lightboxCounter').textContent=`${lightboxIndex+1} из ${lightboxPhotos.length}`;$('#lightboxCaption').textContent=(p.original_name?p.original_name+' · ':'')+fmt(p.created_at);$('#lightboxThumbs').innerHTML=lightboxPhotos.map((x,i)=>`<button type="button" data-lightbox-index="${i}" class="${i===lightboxIndex?'active':''}"><img src="${x.url}" alt="Фото ${i+1}"></button>`).join('');document.querySelectorAll('[data-lightbox-index]').forEach(b=>b.onclick=()=>{lightboxIndex=Number(b.dataset.lightboxIndex);renderLightbox()});$('#lightboxPrev').style.visibility=lightboxPhotos.length>1?'visible':'hidden';$('#lightboxNext').style.visibility=lightboxPhotos.length>1?'visible':'hidden';}
 function closePhotoGallery(){$('#photoLightbox').classList.remove('open');$('#photoLightbox').setAttribute('aria-hidden','true');document.body.style.overflow='';$('#lightboxImage').removeAttribute('src');}
-$('#lightboxClose').onclick=closePhotoGallery;$('#photoLightbox').onclick=e=>{if(e.target===$('#photoLightbox'))closePhotoGallery()};$('#lightboxPrev').onclick=()=>{if(!lightboxPhotos.length)return;lightboxIndex=(lightboxIndex-1+lightboxPhotos.length)%lightboxPhotos.length;renderLightbox()};$('#lightboxNext').onclick=()=>{if(!lightboxPhotos.length)return;lightboxIndex=(lightboxIndex+1)%lightboxPhotos.length;renderLightbox()};document.addEventListener('keydown',e=>{if(!$('#photoLightbox').classList.contains('open'))return;if(e.key==='Escape')closePhotoGallery();if(e.key==='ArrowLeft')$('#lightboxPrev').click();if(e.key==='ArrowRight')$('#lightboxNext').click();});
+if($('#lightboxClose'))$('#lightboxClose').onclick=closePhotoGallery;if($('#photoLightbox'))$('#photoLightbox').onclick=e=>{if(e.target===$('#photoLightbox'))closePhotoGallery()};if($('#lightboxPrev'))$('#lightboxPrev').onclick=()=>{if(!lightboxPhotos.length)return;lightboxIndex=(lightboxIndex-1+lightboxPhotos.length)%lightboxPhotos.length;renderLightbox()};if($('#lightboxNext'))$('#lightboxNext').onclick=()=>{if(!lightboxPhotos.length)return;lightboxIndex=(lightboxIndex+1)%lightboxPhotos.length;renderLightbox()};document.addEventListener('keydown',e=>{if(!$('#photoLightbox').classList.contains('open'))return;if(e.key==='Escape')closePhotoGallery();if(e.key==='ArrowLeft')$('#lightboxPrev').click();if(e.key==='ArrowRight')$('#lightboxNext').click();});
 function render(){const x=selected;if(!x)return;const canReview=['pending_verification','returned_for_revision'].includes(x.status),canResolution=x.status==='resolution_submitted',canPkm=x.pkm_required&&x.status==='awaiting_pkm',canCourse=x.course_status==='required'&&x.status==='awaiting_training',canUnblock=x.status==='ready_for_unblock';const measures=(catalog?.measures||[]).map(m=>`<label class="measure"><input type="checkbox" name="measure" value="${esc(m)}" ${m==='Работы остановлены до устранения'?'checked':''}><span>${esc(m)}</span></label>`).join('');const beforePhotos=photoBlock(x.photos,'violation','Материалы, направленные работником при остановке');const afterPhotos=photoBlock(x.photos,'resolution','Подтверждение устранения замечаний');
 let decision='';
 if(canReview){decision=`<div class="decision-card detail-anchor" id="decisionCard"><div class="decision-head"><div><h3>Решение координатора</h3><p>Проверьте материалы и выберите действие по остановке.</p></div><span class="status ${cls(x.status)}">${esc(x.status_label)}</span></div><label>Комментарий<textarea id="reviewNote" rows="2" placeholder="Комментарий; для возврата или отклонения — причина обязательна"></textarea></label><div class="action-row decision-actions"><button class="btn green" id="verify">✓ Подтвердить остановку</button><button class="btn light" id="return">↩ На доработку</button><button class="btn red" id="reject">✕ Отклонить</button></div><div class="review-grid"><label>Категория<select id="reviewSeverity"><option value="gross" ${x.current_severity==='gross'?'selected':''}>Грубое</option><option value="significant" ${x.current_severity==='significant'?'selected':''}>Значительное</option><option value="minor" ${x.current_severity==='minor'?'selected':''}>Незначительное</option></select></label><label>Назначить обучение<select id="reviewCourse"><option value="">Не назначать</option>${(catalog.courses||[]).map(c=>`<option>${esc(c)}</option>`).join('')}</select></label></div><div class="box"><h4>Меры воздействия</h4><div class="measures">${measures}</div></div><div class="review-grid"><div><label class="measure"><input id="pkmRequired" type="checkbox"><span>Требуется ПКМ</span></label><label class="measure"><input id="blockResponsible" type="checkbox"><span>Заблокировать пропуск ответственного</span></label></div><label>Срок блокировки, дней<input id="blockDays" type="number" min="1" max="365" placeholder="Пусто = до выполнения условий"></label></div></div>`;}
@@ -65,14 +113,7 @@ async function resolution(action){const note=prompt(action==='return'?'Что н
 async function pkm(action){selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/pkm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,text:$('#pkmText')?.value||''})});render();load()}
 async function coursePassed(){selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/course-passed`,{method:'POST'});render();load()}
 async function unblock(){if(!confirm('Снять блокировку пропуска и закрыть остановку?'))return;selected=await api(`/api/pb-mng/coordinator/stops/${selected.id}/unblock`,{method:'POST'});render();load()}
-async function loadRoutes(){const d=await api('/api/pb-mng/coordinator/email-routes');$('#routeList').innerHTML=d.items.map(x=>`<div><span>${esc(x.block||'Все блоки')}</span><span>${esc(x.contractor||'Все подрядчики')}</span><span>${esc(x.role)} · ${esc(x.recipient_name)}</span><b>${esc(x.email)}</b></div>`).join('')||'<p>Дополнительные адресаты пока не настроены.</p>'}
+async function loadRoutes(){try{const d=await api('/api/pb-mng/coordinator/email-routes');$('#routeList').innerHTML=d.items.map(x=>`<div><span>${esc(x.block||'Все блоки')}</span><span>${esc(x.contractor||'Все подрядчики')}</span><span>${esc(x.role)} · ${esc(x.recipient_name)}</span><b>${esc(x.email)}</b></div>`).join('')||'<p>Дополнительные адресаты пока не настроены.</p>'}catch(e){$('#routeList').innerHTML='<p class="notice">Email-маршрутизация временно недоступна: '+esc(e.message)+'</p>'}}
 $('#addRoute').onclick=async()=>{try{await api('/api/pb-mng/coordinator/email-routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({block:$('#rBlock').value,contractor:$('#rContractor').value,role:$('#rRole').value,recipient_name:$('#rName').value,email:$('#rEmail').value})});$('#rEmail').value='';loadRoutes()}catch(e){alert(e.message)}};$('#refresh').onclick=load;$('#statusFilter').onchange=load;$('#severityFilter').onchange=load;let timer;$('#search').oninput=()=>{clearTimeout(timer);timer=setTimeout(load,350)};load();loadRoutes();
 </script>
-<div class="photo-lightbox" id="photoLightbox" aria-hidden="true">
-  <div class="photo-lightbox-inner">
-    <div class="photo-lightbox-head"><b id="lightboxTitle">Фотоматериалы</b><button class="photo-lightbox-close" id="lightboxClose" type="button">×</button></div>
-    <div class="photo-lightbox-stage"><button class="photo-lightbox-nav prev" id="lightboxPrev" type="button">‹</button><img id="lightboxImage" alt="Фотоматериал"><button class="photo-lightbox-nav next" id="lightboxNext" type="button">›</button></div>
-    <div class="photo-lightbox-footer"><div><b id="lightboxCounter"></b><div id="lightboxCaption"></div></div><div class="photo-lightbox-thumbs" id="lightboxThumbs"></div></div>
-  </div>
-</div>
 </body></html>
