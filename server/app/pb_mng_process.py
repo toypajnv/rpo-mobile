@@ -557,6 +557,7 @@ def coordinator_stops(
     severity: str = "",
     q: str = "",
     contractor: str = "",
+    active_only: bool = False,
     date_from: str = "",
     date_to: str = "",
     limit: int = 200,
@@ -566,6 +567,8 @@ def coordinator_stops(
     stmt = select(PbStop)
     if status:
         stmt = stmt.where(PbStop.status == status)
+    elif active_only:
+        stmt = stmt.where(PbStop.status.not_in(["closed", "rejected"]))
     if severity == "unclassified":
         stmt = stmt.where(PbStop.current_severity == "")
     elif severity:
