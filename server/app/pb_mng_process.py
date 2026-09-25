@@ -845,11 +845,44 @@ def add_email_route(payload: EmailRoutePayload, db: Session = Depends(get_db), o
 @router.get("/api/pb-mng/coordinator/stats")
 def coordinator_stats(db: Session = Depends(get_db), operator: Operator = Depends(coordinator_operator)):
     total = db.scalar(select(func.count(PbStop.id))) or 0
-    pending = db.scalar(select(func.count(PbStop.id)).where(PbStop.status == "pending_verification")) or 0
-    active = db.scalar(select(func.count(PbStop.id)).where(PbStop.status.not_in(["closed", "rejected"]))) or 0
-    closed = db.scalar(select(func.count(PbStop.id)).where(PbStop.status == "closed")) or 0
-    by_severity = {s: db.scalar(select(func.count(PbStop.id)).where(PbStop.current_severity == s)) or 0 for s in SEVERITY_LABELS}
-    return {"total": total, "pending": pending, "active": active, "closed": closed, "by_severity": by_severity}
+    by_status = {
+        status: db.scalar(select(func.count(PbStop.id)).where(PbStop.status == status)) or 0
+        for status in STATUS_LABELS
+    }
+    active = sum(count for status, count in by_status.items() if status not in {"closed", "rejected"})
+    closed = by_status.get("closed", 0)
+    pending = by_status.get("pending_verification", 0)
+    by_severity = {
+        s: db.scalar(select(func.count(PbStop.id)).where(PbStop.current_severity == s)) or 0
+        for s in SEVERITY_LABELS
+    }
+    unclassified = db.scalar(
+        select(func.count(PbStop.id)).where(
+            PbStop.current_severity == "",
+            PbStop.status.not_in(["closed", "rejected"]),
+        )
+    ) or 0
+    action_required = sum(
+        by_status.get(status, 0)
+        for status in {
+            "pending_verification",
+            "resolution_submitted",
+            "awaiting_pkm",
+            "awaiting_training",
+            "ready_for_unblock",
+        }
+    )
+    return {
+        "total": total,
+        "pending": pending,
+        "active": active,
+        "closed": closed,
+        "unclassified": unclassified,
+        "action_required": action_required,
+        "by_severity": by_severity,
+        "by_status": by_status,
+        "status_labels": STATUS_LABELS,
+    }
 
 
 def _excel_headers() -> list[str]:
