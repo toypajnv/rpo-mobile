@@ -1,0 +1,35 @@
+name: PB_MNG Prototype Smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-pb-mng:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Wait for PB_MNG autodeploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for attempt in $(seq 1 36); do
+            page="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/ 2>/dev/null || true)"
+            manifest="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/manifest.webmanifest 2>/dev/null || true)"
+            sw="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/sw.js 2>/dev/null || true)"
+            if [[ "$page" == *'ПБ_МНГ'* ]] \
+              && [[ "$page" == *'Остановить работу'* ]] \
+              && [[ "$manifest" == *'"/pb-mng/"'* ]] \
+              && [[ "$sw" == *'pb-mng-prototype-20260925-1'* ]]; then
+              echo "PB_MNG prototype is live on attempt $attempt"
+              ok=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ok" = "1"
