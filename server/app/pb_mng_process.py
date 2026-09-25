@@ -547,7 +547,11 @@ def coordinator_page(request: Request, db: Session = Depends(get_db)):
     operator = _current_operator_or_none(request, db)
     if not operator:
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse(request=request, name="pb_mng_coordinator.html", context={"operator": operator})
+    response = templates.TemplateResponse(request=request, name="pb_mng_coordinator.html", context={"operator": operator})
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-PB-MNG-Coordinator-Version"] = "20260925-5"
+    return response
 
 
 @router.get("/api/pb-mng/coordinator/stops")
