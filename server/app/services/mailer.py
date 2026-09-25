@@ -115,3 +115,37 @@ def send_export(
             smtp.login(settings.smtp_username, settings.smtp_password)
         smtp.send_message(msg)
     return "smtp:sent"
+
+
+def send_notification(
+    recipient: str,
+    subject: str,
+    body: str,
+    idempotency_key: str | None = None,
+) -> str:
+    """Send a plain operational notification without requiring an export attachment."""
+    mode = settings.mail_mode.lower().strip()
+    if mode == "resend":
+        return _send_resend(recipient, subject, body, [], idempotency_key)
+
+    msg = _build_message(recipient, subject, body, [])
+    if mode == "file":
+        import hashlib
+        out = Path(settings.outbox_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        token = hashlib.sha1(f"{recipient}|{subject}|{idempotency_key or ''}".encode("utf-8")).hexdigest()[:20]
+        eml = out / f"notification_{token}.eml"
+        eml.write_bytes(msg.as_bytes())
+        return f"file:{eml}"
+
+    if mode != "smtp":
+        raise RuntimeError(f"Неизвестный MAIL_MODE: {settings.mail_mode}")
+    if not settings.smtp_host:
+        raise RuntimeError("SMTP_HOST не настроен")
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
+        if settings.smtp_starttls:
+            smtp.starttls()
+        if settings.smtp_username:
+            smtp.login(settings.smtp_username, settings.smtp_password)
+        smtp.send_message(msg)
+    return "smtp:sent"
