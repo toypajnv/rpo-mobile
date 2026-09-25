@@ -164,6 +164,8 @@ def _rule_out(rule: PbViolationRule) -> dict:
 
 
 def _effective_severity(stop: PbStop, db: Session, *, record_action: bool = True) -> str:
+    if not stop.current_severity:
+        return ""
     if stop.current_severity != "minor":
         return stop.current_severity
     if stop.status in {"rejected", "closed", "resolution_submitted", "ready_for_unblock"}:
@@ -226,7 +228,7 @@ def _stop_out(stop: PbStop, db: Session, *, include_actions: bool = False) -> di
         },
         "initial_severity": stop.initial_severity,
         "current_severity": stop.current_severity,
-        "severity_label": SEVERITY_LABELS.get(stop.current_severity, stop.current_severity),
+        "severity_label": SEVERITY_LABELS.get(stop.current_severity, "Не классифицировано"),
         "severity_context": stop.severity_context,
         "description": stop.description,
         "responsible": {"fio": stop.responsible_fio, "position": stop.responsible_position, "pass": stop.responsible_pass},
@@ -335,7 +337,9 @@ def _resolve_severity(rule: PbViolationRule, requested: str, context: str) -> st
 class ReviewPayload(BaseModel):
     action: str
     note: str = ""
+    violation_id: str = ""
     severity: str = ""
+    severity_context: str = ""
     measures: list[str] = Field(default_factory=list)
     course_name: str = ""
     pkm_required: bool = False
@@ -406,13 +410,6 @@ def create_stop(
     if not initiator_name:
         raise HTTPException(status_code=400, detail="Укажите ФИО инициатора")
 
-    violation_id = _clean(payload.get("violation_id"), 80)
-    rule = db.get(PbViolationRule, violation_id)
-    if not rule or not rule.active:
-        raise HTTPException(status_code=400, detail="Выберите нарушение из классификатора")
-    severity_context = _clean(payload.get("severity_context"), 2000)
-    severity = _resolve_severity(rule, _clean(payload.get("severity"), 30), severity_context)
-
     try:
         occurred_at = datetime.fromisoformat(str(payload.get("occurred_at") or "").replace("Z", "+00:00"))
         if occurred_at.tzinfo is None:
@@ -437,12 +434,12 @@ def create_stop(
         subcontractor=_clean(payload.get("subcontractor"), 300),
         work_type=_clean(payload.get("work_type"), 180),
         permit_number=_clean(payload.get("permit_number"), 100),
-        violation_id=rule.id,
-        violation_text=rule.text,
-        violation_barrier=rule.barrier,
-        initial_severity=severity,
-        current_severity=severity,
-        severity_context=severity_context,
+        violation_id="",
+        violation_text="",
+        violation_barrier="",
+        initial_severity="",
+        current_severity="",
+        severity_context="",
         description=_clean(payload.get("description"), 5000),
         responsible_fio=_clean(responsible.get("fio"), 240),
         responsible_position=_clean(responsible.get("position"), 240),
@@ -555,16 +552,51 @@ def coordinator_page(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/api/pb-mng/coordinator/stops")
-def coordinator_stops(status: str = "", severity: str = "", q: str = "", limit: int = 200, db: Session = Depends(get_db), operator: Operator = Depends(coordinator_operator)):
+def coordinator_stops(
+    status: str = "",
+    severity: str = "",
+    q: str = "",
+    contractor: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 200,
+    db: Session = Depends(get_db),
+    operator: Operator = Depends(coordinator_operator),
+):
     stmt = select(PbStop)
     if status:
         stmt = stmt.where(PbStop.status == status)
-    if severity:
+    if severity == "unclassified":
+        stmt = stmt.where(PbStop.current_severity == "")
+    elif severity:
         stmt = stmt.where(PbStop.current_severity == severity)
+    if contractor:
+        stmt = stmt.where(PbStop.contractor.ilike(f"%{contractor.strip()}%"))
+    if date_from:
+        try:
+            start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+            stmt = stmt.where(PbStop.occurred_at >= start)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Некорректная дата начала")
+    if date_to:
+        try:
+            end = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
+            stmt = stmt.where(PbStop.occurred_at < end)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Некорректная дата окончания")
     if q:
         token = f"%{q.strip()}%"
-        stmt = stmt.where(or_(PbStop.public_id.ilike(token), PbStop.contractor.ilike(token), PbStop.location.ilike(token), PbStop.violation_text.ilike(token)))
-    rows = db.scalars(stmt.order_by(PbStop.created_at.desc()).limit(min(max(limit, 1), 500))).all()
+        stmt = stmt.where(or_(
+            PbStop.public_id.ilike(token),
+            PbStop.contractor.ilike(token),
+            PbStop.location.ilike(token),
+            PbStop.field_name.ilike(token),
+            PbStop.description.ilike(token),
+            PbStop.violation_text.ilike(token),
+            PbStop.responsible_fio.ilike(token),
+            PbStop.initiator_name.ilike(token),
+        ))
+    rows = db.scalars(stmt.order_by(PbStop.created_at.desc()).limit(min(max(limit, 1), 1000))).all()
     return {"items": [_stop_out(x, db) for x in rows]}
 
 
@@ -662,10 +694,19 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
         stop.closed_at = utcnow()
         _audit(db, stop, "coordinator", operator.username, "rejected", {"note": stop.verification_note})
     elif action == "verify":
-        severity = payload.severity.strip() or _effective_severity(stop, db)
-        if severity not in SEVERITY_LABELS:
-            raise HTTPException(status_code=400, detail="Некорректная категория нарушения")
+        violation_id = _clean(payload.violation_id, 80)
+        rule = db.get(PbViolationRule, violation_id)
+        if not rule or not rule.active:
+            raise HTTPException(status_code=400, detail="Координатор должен выбрать нарушение из классификатора")
+        severity_context = _clean(payload.severity_context, 2000)
+        severity = _resolve_severity(rule, _clean(payload.severity, 30), severity_context)
+        stop.violation_id = rule.id
+        stop.violation_text = rule.text
+        stop.violation_barrier = rule.barrier
+        if not stop.initial_severity:
+            stop.initial_severity = severity
         stop.current_severity = severity
+        stop.severity_context = severity_context
         stop.status = "awaiting_resolution"
         stop.verification_note = _clean(payload.note, 5000)
         selected_measures = payload.measures or _recommended_measures(severity)
@@ -681,7 +722,7 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
             ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
             stop.block_until = ends_at
             db.add(PbAccessRestriction(stop_id=stop.id, pass_number=normalize_pass_number(stop.responsible_pass) or stop.responsible_pass, fio=stop.responsible_fio, restriction_kind="personnel", reason=stop.violation_text, ends_at=ends_at, active=True))
-        _audit(db, stop, "coordinator", operator.username, "verified", {"severity": severity, "measures": _json(stop.measures_json, []), "block": bool(should_block)})
+        _audit(db, stop, "coordinator", operator.username, "verified", {"violation_id": rule.id, "severity": severity, "severity_context": severity_context, "measures": _json(stop.measures_json, []), "block": bool(should_block)})
         _notify_verified(db, stop)
     else:
         raise HTTPException(status_code=400, detail="Неизвестное решение координатора")
