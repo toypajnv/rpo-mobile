@@ -1,0 +1,39 @@
+name: PB_MNG Quality
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pb-mng:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: server
+      DATABASE_URL: sqlite:////tmp/test_pb_mng.db
+      SECRET_KEY: pb-mng-quality-secret
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: Test123!
+      MAIL_MODE: file
+      EXPORT_DIR: /tmp/pb-mng-exports
+      OUTBOX_DIR: /tmp/pb-mng-outbox
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: server/requirements-test.txt
+      - run: python -m pip install -r server/requirements-test.txt
+      - name: Compile PB_MNG backend
+        run: python -m py_compile server/app/pb_mng_models.py server/app/pb_mng_process.py
+      - name: Check PB_MNG JavaScript
+        run: |
+          node --check server/app/pb_mng/app.js
+          node --check server/app/pb_mng/sw.js
+      - name: Run PB_MNG workflow test
+        run: python -m unittest server.tests.test_pb_mng_workflow -v
