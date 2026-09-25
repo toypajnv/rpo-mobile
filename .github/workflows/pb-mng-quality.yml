@@ -39,12 +39,15 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           src = Path('server/app/templates/pb_mng_coordinator.html').read_text(encoding='utf-8')
-          assert '/pb-mng/coordinator.js?v=20260925-5' in src
-          assert 'Версия координатора 20260925-5' in src
+          assert '/pb-mng/coordinator.js?v=20260925-6' in src
+          assert 'Версия координатора 20260925-6' in src
           assert '<script>' not in src
           js = Path('server/app/pb_mng/coordinator.js').read_text(encoding='utf-8')
           assert 'startCoordinator()' in js
           assert 'async function load()' in js
+          assert 'loadRegistry()' in js
+          assert 'reviewViolationId' in js
+          assert 'Реестр остановок' in src
           print('External coordinator runtime contract OK')
           PY
       - name: Run PB_MNG workflow test
