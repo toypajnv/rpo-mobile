@@ -196,6 +196,8 @@ def _photo_out(photo: PbPhoto) -> dict:
         "id": photo.id,
         "phase": photo.phase,
         "url": f"/api/pb-mng/photos/{photo.id}",
+        "original_name": photo.original_name or "",
+        "mime_type": photo.mime_type or "",
         "created_at": photo.created_at.isoformat(),
     }
 
