@@ -100,6 +100,12 @@
       <label>Комментарий<textarea id="resolutionComment" rows="3" placeholder="Что выполнено"></textarea></label>
       <button class="primary" id="submitResolution" type="button">Отправить подтверждение</button>
     </div>
+    <div class="form-card hidden" id="pkmBox">
+      <h3>План корректирующих мероприятий</h3>
+      <p class="muted">Координатор требует ПКМ. Опишите мероприятия, ответственных и сроки.</p>
+      <label>ПКМ<textarea id="pkmText" rows="6" placeholder="Мероприятие — срок — ответственный"></textarea></label>
+      <button class="primary" id="submitPkm" type="button">Отправить ПКМ координатору</button>
+    </div>
     <div class="form-card hidden" id="revisionBox">
       <h3>Координатор вернул карточку</h3><p id="revisionText" class="muted"></p>
       <label>Исправленное описание<textarea id="revisionDescription" rows="4"></textarea></label>
