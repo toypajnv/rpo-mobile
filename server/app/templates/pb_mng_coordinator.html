@@ -57,20 +57,50 @@
 .classification-criteria{margin-top:10px;display:grid;gap:8px}
 .classification-criteria .criteria-note{font-size:10px;color:var(--muted);line-height:1.4}
 @media(max-width:1100px){.registry-filters{grid-template-columns:1fr 1fr 1fr}.registry-head{flex-direction:column}}
+
+.coordinator-overview{margin-bottom:14px}.overview-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:10px}.overview-head h2{margin:0;font-size:22px}.overview-head p{margin:4px 0 0;color:var(--muted);font-size:12px}
+.summary-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:13px}.summary-card{border:1px solid var(--line);border-radius:14px;background:white;padding:12px 14px;text-align:left;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center}.summary-card:hover{border-color:#a9c6ec;box-shadow:0 5px 16px rgba(28,64,110,.07)}.summary-card span{font-size:11px;color:var(--muted);font-weight:700}.summary-card b{grid-row:1/3;grid-column:2;font-size:25px}.summary-card small{font-size:9px;color:#8995a6}.summary-card.attention{background:#fffaf0;border-color:#ecd9aa}
+.workflow-title{display:flex;justify-content:space-between;align-items:center;margin:0 2px 8px}.workflow-title b{font-size:12px}.workflow-title span{font-size:10px;color:var(--blue);font-weight:800}
+.workflow-stages{display:grid;grid-template-columns:repeat(5,minmax(155px,1fr));gap:8px}.stage-card{position:relative;border:1px solid var(--line);background:white;border-radius:14px;padding:11px;display:grid;grid-template-columns:30px 1fr auto;gap:9px;align-items:center;text-align:left;cursor:pointer;min-height:67px;transition:.15s}.stage-card:hover{transform:translateY(-1px);border-color:#a9c6ec;box-shadow:0 5px 15px rgba(28,64,110,.07)}.stage-card.active{border:2px solid var(--blue);background:#f3f7ff;padding:10px}.stage-step{width:29px;height:29px;border-radius:9px;background:#eef3f9;color:#63748a;display:grid;place-items:center;font-size:11px;font-weight:900}.stage-card div{display:flex;flex-direction:column;gap:2px;min-width:0}.stage-card small{font-size:8px;color:#8995a6;text-transform:uppercase;font-weight:800;letter-spacing:.03em}.stage-card b{font-size:11px;line-height:1.2}.stage-card strong{font-size:21px}.stage-new .stage-step{background:#e8f1ff;color:#1765c5}.stage-action .stage-step{background:#fff0dc;color:#a55c00}.stage-action strong{color:#a55c00}.stage-done .stage-step{background:#e5f6ec;color:#177447}.stage-rejected .stage-step{background:#ffe9e5;color:#b93228}
+.queue-toolbar{position:sticky;top:76px;z-index:8;box-shadow:0 5px 18px rgba(29,52,82,.04)}.queue-item{position:relative}.queue-item h3{padding-right:10px}.queue-item p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.queue-item.active:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--blue)}
+.settings-intro{background:white;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:12px}.settings-intro h2{margin:0 0 5px}.settings-intro p{margin:0;color:var(--muted);font-size:12px}.settings-intro+.routes{margin-top:0}
+@media(max-width:1250px){.workflow-stages{grid-template-columns:repeat(3,1fr)}}@media(max-width:900px){.summary-cards{grid-template-columns:repeat(2,1fr)}.workflow-stages{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
-<header class="top"><div class="logo">ПБ</div><div class="title"><b>ПБ_МНГ · Координатор остановок</b><span>Верификация → меры → устранение → разблокировка · Версия координатора 20260925-6</span></div><div class="user">{{ operator.username }} <a href="/dashboard">Панель РПО</a></div></header>
+<header class="top"><div class="logo">ПБ</div><div class="title"><b>ПБ_МНГ · Координатор остановок</b><span>Верификация → меры → устранение → разблокировка · Версия координатора 20260925-7</span></div><div class="user">{{ operator.username }} <a href="/dashboard">Панель РПО</a></div></header>
 <main class="wrap">
 <nav class="server-tabs">
-  <button class="server-tab active" type="button" data-server-tab="verification">Верификация</button>
+  <button class="server-tab active" type="button" data-server-tab="verification">Рабочая очередь</button>
   <button class="server-tab" type="button" data-server-tab="registry">Реестр остановок</button>
+  <button class="server-tab" type="button" data-server-tab="settings">Настройки</button>
 </nav>
 <section class="server-tab-panel" id="verificationPanel">
-<div class="stats"><div class="stat"><b id="sPending">—</b><span>На проверке</span></div><div class="stat"><b id="sActive">—</b><span>Активные</span></div><div class="stat"><b id="sGross">—</b><span>Грубые</span></div><div class="stat"><b id="sSignificant">—</b><span>Значительные</span></div><div class="stat"><b id="sClosed">—</b><span>Закрыто</span></div></div>
-<div class="toolbar"><input id="search" placeholder="Поиск: номер, подрядчик, объект, нарушение"><select id="statusFilter"><option value="">Все статусы</option><option value="pending_verification">На проверке</option><option value="returned_for_revision">На доработке</option><option value="awaiting_resolution">Ожидается устранение</option><option value="resolution_submitted">Устранение заявлено</option><option value="awaiting_pkm">Ожидается ПКМ</option><option value="awaiting_training">Ожидается обучение</option><option value="ready_for_unblock">К разблокировке</option><option value="closed">Закрыта</option><option value="rejected">Отклонена</option></select><select id="severityFilter"><option value="">Все категории</option><option value="gross">Грубое</option><option value="significant">Значительное</option><option value="minor">Незначительное</option></select><button class="btn light" id="refresh">Обновить</button><a class="btn primary" href="/api/pb-mng/coordinator/export.xlsx">Excel</a></div>
+<section class="coordinator-overview">
+  <div class="overview-head"><div><h2>Рабочая очередь</h2><p>Выберите этап — ниже сразу откроются остановки, которые находятся на нём.</p></div><button class="btn light" id="clearStageFilter" type="button">Показать все</button></div>
+  <div class="summary-cards">
+    <button class="summary-card" type="button" data-summary-filter=""><span>Активные</span><b id="sActive">—</b><small>Все незакрытые</small></button>
+    <button class="summary-card attention" type="button" data-severity-filter="unclassified"><span>Без классификации</span><b id="sUnclassified">—</b><small>Нужно решение</small></button>
+    <button class="summary-card" type="button" data-severity-filter="gross"><span>Грубые</span><b id="sGross">—</b><small>Активные и завершённые</small></button>
+    <button class="summary-card" type="button" data-severity-filter="significant"><span>Значительные</span><b id="sSignificant">—</b><small>Активные и завершённые</small></button>
+  </div>
+  <div class="workflow-title"><b>Этапы процесса</b><span id="activeStageCaption">Все этапы</span></div>
+  <div class="workflow-stages">
+    <button class="stage-card stage-new" type="button" data-status-card="pending_verification"><span class="stage-step">1</span><div><small>Верификация</small><b>Новые</b></div><strong id="stPending">—</strong></button>
+    <button class="stage-card" type="button" data-status-card="returned_for_revision"><span class="stage-step">↩</span><div><small>Верификация</small><b>На доработке</b></div><strong id="stReturned">—</strong></button>
+    <button class="stage-card" type="button" data-status-card="awaiting_resolution"><span class="stage-step">2</span><div><small>После решения</small><b>Ждём устранение</b></div><strong id="stAwaitingResolution">—</strong></button>
+    <button class="stage-card stage-action" type="button" data-status-card="resolution_submitted"><span class="stage-step">3</span><div><small>Требует действия</small><b>Проверить устранение</b></div><strong id="stResolutionSubmitted">—</strong></button>
+    <button class="stage-card" type="button" data-status-card="resolution_revision"><span class="stage-step">↩</span><div><small>Устранение</small><b>На доработке</b></div><strong id="stResolutionRevision">—</strong></button>
+    <button class="stage-card stage-action" type="button" data-status-card="awaiting_pkm"><span class="stage-step">4</span><div><small>Требует действия</small><b>ПКМ</b></div><strong id="stPkm">—</strong></button>
+    <button class="stage-card stage-action" type="button" data-status-card="awaiting_training"><span class="stage-step">5</span><div><small>Требует действия</small><b>Обучение</b></div><strong id="stTraining">—</strong></button>
+    <button class="stage-card stage-action" type="button" data-status-card="ready_for_unblock"><span class="stage-step">6</span><div><small>Финальный этап</small><b>К разблокировке</b></div><strong id="stUnblock">—</strong></button>
+    <button class="stage-card stage-done" type="button" data-status-card="closed"><span class="stage-step">✓</span><div><small>Завершено</small><b>Закрыто</b></div><strong id="stClosed">—</strong></button>
+    <button class="stage-card stage-rejected" type="button" data-status-card="rejected"><span class="stage-step">×</span><div><small>Завершено</small><b>Отклонено</b></div><strong id="stRejected">—</strong></button>
+  </div>
+</section>
+<div class="toolbar queue-toolbar"><input id="search" placeholder="Быстрый поиск: № остановки, подрядчик, объект, ФИО"><select id="statusFilter"><option value="">Все статусы</option><option value="pending_verification">На проверке</option><option value="returned_for_revision">На доработке</option><option value="awaiting_resolution">Ожидается устранение</option><option value="resolution_submitted">Устранение заявлено</option><option value="awaiting_pkm">Ожидается ПКМ</option><option value="awaiting_training">Ожидается обучение</option><option value="ready_for_unblock">К разблокировке</option><option value="closed">Закрыта</option><option value="rejected">Отклонена</option></select><select id="severityFilter"><option value="">Все категории</option><option value="gross">Грубое</option><option value="significant">Значительное</option><option value="minor">Незначительное</option></select><button class="btn light" id="resetFilters" type="button">Сбросить</button><button class="btn light" id="refresh">Обновить</button></div>
 <div class="layout"><section class="panel queue" id="queue"></section><section class="panel detail" id="detail"><div class="empty">Выберите остановку слева</div></section></div>
-<section class="routes"><h3>Email-маршрутизация</h3><p class="notice">В исходных данных были ФИО/роли ЕОЛ, но не email-адреса. Добавьте адреса здесь — после этого подтверждённые остановки автоматически будут направляться по совпадению блока/подрядчика. Общий адрес остановок уже используется системой.</p><div class="route-form"><input id="rBlock" placeholder="Блок (необязательно)"><input id="rContractor" placeholder="Подрядчик (необязательно)"><input id="rRole" placeholder="Роль: ЕОЛ / ЗГД" value="ЕОЛ"><input id="rName" placeholder="ФИО"><input id="rEmail" placeholder="email@company.ru"><button class="btn primary" id="addRoute">Добавить</button></div><div class="route-list" id="routeList"></div></section>
+
 </section>
 <section class="server-tab-panel hidden" id="registryPanel">
   <div class="registry-shell">
@@ -94,6 +124,10 @@
     </div>
   </div>
 </section>
+<section class="server-tab-panel hidden" id="settingsPanel">
+  <div class="settings-intro"><h2>Настройки</h2><p>Служебные настройки маршрутизации уведомлений. Они не мешают ежедневной работе координатора.</p></div>
+  <section class="routes"><h3>Email-маршрутизация</h3><p class="notice">В исходных данных были ФИО/роли ЕОЛ, но не email-адреса. Добавьте адреса здесь — после этого подтверждённые остановки автоматически будут направляться по совпадению блока/подрядчика. Общий адрес остановок уже используется системой.</p><div class="route-form"><input id="rBlock" placeholder="Блок (необязательно)"><input id="rContractor" placeholder="Подрядчик (необязательно)"><input id="rRole" placeholder="Роль: ЕОЛ / ЗГД" value="ЕОЛ"><input id="rName" placeholder="ФИО"><input id="rEmail" placeholder="email@company.ru"><button class="btn primary" id="addRoute">Добавить</button></div><div class="route-list" id="routeList"></div></section>
+</section>
 </main>
 <div class="photo-lightbox" id="photoLightbox" aria-hidden="true">
   <div class="photo-lightbox-inner">
@@ -102,5 +136,5 @@
     <div class="photo-lightbox-footer"><div><b id="lightboxCounter"></b><div id="lightboxCaption"></div></div><div class="photo-lightbox-thumbs" id="lightboxThumbs"></div></div>
   </div>
 </div>
-<script src="/pb-mng/coordinator.js?v=20260925-6" defer></script>
+<script src="/pb-mng/coordinator.js?v=20260925-7" defer></script>
 </body></html>
