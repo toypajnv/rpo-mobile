@@ -29,13 +29,9 @@ jobs:
               && [[ "$catalog" == *'"minor_reclassify_minutes":60'* ]] \
               && [[ "$openapi" == *'"/api/pb-mng/stops"'* ]] \
               && [[ "$openapi" == *'"/api/pb-mng/coordinator/stops/{public_id}/review"'* ]]; then
-              python3 - <<'PY'
-import json, urllib.request
-data=json.load(urllib.request.urlopen('https://rpo-mng.ru/api/pb-mng/catalog', timeout=10))
-assert len(data['violations']) >= 170, len(data['violations'])
-assert data['process_rules']['minor_reclassify_minutes'] == 60
-print('PB_MNG catalog:', len(data['violations']), 'violations')
-PY
+              count="$(python3 -c "import json,sys; print(len(json.load(sys.stdin)['violations']))" <<<"$catalog")"
+              test "$count" -ge 170
+              echo "PB_MNG catalog: $count violations"
               ok=1
               break
             fi
