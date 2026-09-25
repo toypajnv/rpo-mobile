@@ -1,27 +1,43 @@
-const $=s=>document.querySelector(s);let selected=null,catalog=null,reviewViolationId='',reviewSeverity='';
+const $=s=>document.querySelector(s);let selected=null,catalog=null,reviewViolationId='',reviewSeverity='',activeOnly=false;
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function fmt(v){if(!v)return'';return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(v))}function cls(s){if(s==='closed')return'green';if(s==='rejected')return'red';if(['pending_verification','resolution_submitted'].includes(s))return'blue';return'amber'}async function api(url,opts={}){const r=await fetch(url,opts);const d=(r.headers.get('content-type')||'').includes('json')?await r.json():await r.text();if(r.status===401){location.href='/login';throw new Error('Требуется вход')}if(!r.ok)throw new Error(d?.detail||d);return d}
 async function load(){
   const p=new URLSearchParams();
   if($('#statusFilter').value)p.set('status',$('#statusFilter').value);
   if($('#severityFilter').value)p.set('severity',$('#severityFilter').value);
   if($('#search').value)p.set('q',$('#search').value);
+  if(activeOnly&&!$('#statusFilter').value)p.set('active_only','true');
 
   let d={items:[]};
   try{
     d=await api('/api/pb-mng/coordinator/stops?'+p);
     $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label||'Не классифицировано')}</h3><p>${esc(x.violation.text||x.description||'Остановка работ')}</p><div class="meta"><span>${esc(x.contractor||x.location)}</span><b>${fmt(x.created_at)}</b></div></button>`).join(''):'<div class="empty">Нет карточек</div>';
     document.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openStop(b.dataset.id));
+    const visibleIds=new Set((d.items||[]).map(x=>x.id));
+    if(selected&&!visibleIds.has(selected.id)){selected=null;$('#detail').innerHTML='<div class="empty">Выберите остановку слева</div>';}
   }catch(e){
     $('#queue').innerHTML=`<div class="empty"><b>Не удалось загрузить очередь</b><br><small>${esc(e.message)}</small><br><button class="btn light" style="margin-top:12px" onclick="load()">Повторить</button></div>`;
   }
 
   try{
     const s=await api('/api/pb-mng/coordinator/stats');
-    $('#sPending').textContent=s.pending;
     $('#sActive').textContent=s.active;
+    $('#sUnclassified').textContent=s.unclassified;
     $('#sGross').textContent=s.by_severity.gross;
     $('#sSignificant').textContent=s.by_severity.significant;
-    $('#sClosed').textContent=s.closed;
+    const by=s.by_status||{};
+    const map={
+      stPending:'pending_verification',
+      stReturned:'returned_for_revision',
+      stAwaitingResolution:'awaiting_resolution',
+      stResolutionSubmitted:'resolution_submitted',
+      stResolutionRevision:'resolution_revision',
+      stPkm:'awaiting_pkm',
+      stTraining:'awaiting_training',
+      stUnblock:'ready_for_unblock',
+      stClosed:'closed',
+      stRejected:'rejected'
+    };
+    Object.entries(map).forEach(([id,status])=>{const el=$('#'+id);if(el)el.textContent=by[status]??0;});
   }catch(e){
     console.warn('PB_MNG stats:',e);
   }
@@ -41,6 +57,43 @@ async function load(){
     catch(e){console.warn('PB_MNG first stop:',e);}
   }
   highlightSelected();
+}
+const STATUS_CAPTIONS={
+  pending_verification:'Новые — на верификации',
+  returned_for_revision:'Карточки на доработке',
+  awaiting_resolution:'Ожидается устранение',
+  resolution_submitted:'Проверить устранение',
+  resolution_revision:'Устранение на доработке',
+  awaiting_pkm:'Ожидается / проверяется ПКМ',
+  awaiting_training:'Ожидается обучение',
+  ready_for_unblock:'Готово к разблокировке',
+  closed:'Закрытые остановки',
+  rejected:'Отклонённые остановки'
+};
+function syncStageUi(){
+  const status=$('#statusFilter')?.value||'';
+  document.querySelectorAll('[data-status-card]').forEach(b=>b.classList.toggle('active',b.dataset.statusCard===status&&!activeOnly));
+  const caption=$('#activeStageCaption');
+  if(caption)caption.textContent=activeOnly?'Все активные':(STATUS_CAPTIONS[status]||($('#severityFilter')?.value==='unclassified'?'Без классификации':'Все этапы'));
+}
+async function applyQueueFilter({status='',severity='',active=false}={}){
+  activeOnly=!!active;
+  if($('#statusFilter'))$('#statusFilter').value=status;
+  if($('#severityFilter'))$('#severityFilter').value=severity;
+  selected=null;
+  if($('#detail'))$('#detail').innerHTML='<div class="empty">Загрузка карточки…</div>';
+  syncStageUi();
+  await load();
+  $('#queue')?.scrollTo({top:0,behavior:'smooth'});
+}
+function resetQueueFilters(){
+  activeOnly=false;
+  if($('#search'))$('#search').value='';
+  if($('#statusFilter'))$('#statusFilter').value='';
+  if($('#severityFilter'))$('#severityFilter').value='';
+  selected=null;
+  syncStageUi();
+  load();
 }
 function highlightSelected(){document.querySelectorAll('.queue-item').forEach(b=>b.classList.toggle('active',!!selected&&b.dataset.id===selected.id));}
 async function openStop(id){selected=await api('/api/pb-mng/coordinator/stops/'+encodeURIComponent(id));render();highlightSelected();}
@@ -134,7 +187,9 @@ function showServerTab(name){
   document.querySelectorAll('[data-server-tab]').forEach(b=>b.classList.toggle('active',b.dataset.serverTab===name));
   $('#verificationPanel').classList.toggle('hidden',name!=='verification');
   $('#registryPanel').classList.toggle('hidden',name!=='registry');
+  $('#settingsPanel').classList.toggle('hidden',name!=='settings');
   if(name==='registry')loadRegistry();
+  if(name==='settings')loadRoutes();
 }
 async function loadRegistry(){
   const p=new URLSearchParams({limit:'1000'});
@@ -156,7 +211,18 @@ if($('#registryTo'))$('#registryTo').onchange=loadRegistry;
 let registryTimer;if($('#registrySearch'))$('#registrySearch').oninput=()=>{clearTimeout(registryTimer);registryTimer=setTimeout(loadRegistry,300)};
 
 async function loadRoutes(){try{const d=await api('/api/pb-mng/coordinator/email-routes');$('#routeList').innerHTML=d.items.map(x=>`<div><span>${esc(x.block||'Все блоки')}</span><span>${esc(x.contractor||'Все подрядчики')}</span><span>${esc(x.role)} · ${esc(x.recipient_name)}</span><b>${esc(x.email)}</b></div>`).join('')||'<p>Дополнительные адресаты пока не настроены.</p>'}catch(e){$('#routeList').innerHTML='<p class="notice">Email-маршрутизация временно недоступна: '+esc(e.message)+'</p>'}}
-$('#addRoute').onclick=async()=>{try{await api('/api/pb-mng/coordinator/email-routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({block:$('#rBlock').value,contractor:$('#rContractor').value,role:$('#rRole').value,recipient_name:$('#rName').value,email:$('#rEmail').value})});$('#rEmail').value='';loadRoutes()}catch(e){alert(e.message)}};$('#refresh').onclick=load;$('#statusFilter').onchange=load;$('#severityFilter').onchange=load;let timer;$('#search').oninput=()=>{clearTimeout(timer);timer=setTimeout(load,350)};async function startCoordinator(){
+$('#addRoute').onclick=async()=>{try{await api('/api/pb-mng/coordinator/email-routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({block:$('#rBlock').value,contractor:$('#rContractor').value,role:$('#rRole').value,recipient_name:$('#rName').value,email:$('#rEmail').value})});$('#rEmail').value='';loadRoutes()}catch(e){alert(e.message)}};
+document.querySelectorAll('[data-status-card]').forEach(b=>b.onclick=()=>applyQueueFilter({status:b.dataset.statusCard}));
+document.querySelectorAll('[data-severity-filter]').forEach(b=>b.onclick=()=>applyQueueFilter({severity:b.dataset.severityFilter}));
+document.querySelectorAll('[data-summary-filter]').forEach(b=>b.onclick=()=>applyQueueFilter({active:true}));
+if($('#clearStageFilter'))$('#clearStageFilter').onclick=resetQueueFilters;
+if($('#resetFilters'))$('#resetFilters').onclick=resetQueueFilters;
+$('#refresh').onclick=load;
+$('#statusFilter').onchange=()=>{activeOnly=false;selected=null;syncStageUi();load()};
+$('#severityFilter').onchange=()=>{selected=null;syncStageUi();load()};
+let timer;$('#search').oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{selected=null;load()},350)};
+async function startCoordinator(){
+  activeOnly=true;syncStageUi();
   try{await load();}catch(e){
     console.error('PB_MNG coordinator load failed',e);
     const q=$('#queue'); if(q) q.innerHTML='<div class="empty"><b>Ошибка загрузки кабинета</b><br><small>'+esc(e.message||e)+'</small><br><button class="btn light" style="margin-top:12px" onclick="location.reload()">Перезагрузить</button></div>';
