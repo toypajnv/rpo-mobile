@@ -25,13 +25,15 @@ jobs:
             openapi="$(curl -fsS --max-time 10 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
             coordinator_js="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/coordinator.js 2>/dev/null || true)"
             if [[ "$page" == *'РПО и полный цикл остановки'* ]] \
-              && [[ "$sw" == *'pb-mng-v1-20260925-4'* ]] \
+              && [[ "$sw" == *'pb-mng-v1-20260925-6'* ]] \
               && [[ "$catalog" == *'"violations"'* ]] \
               && [[ "$catalog" == *'"minor_reclassify_minutes":60'* ]] \
               && [[ "$openapi" == *'"/api/pb-mng/stops"'* ]] \
               && [[ "$openapi" == *'"/api/pb-mng/coordinator/stops/{public_id}/review"'* ]] \
               && [[ "$coordinator_js" == *'startCoordinator()'* ]] \
-              && [[ "$coordinator_js" == *'photoBlock('* ]]; then
+              && [[ "$coordinator_js" == *'photoBlock('* ]] \
+              && [[ "$coordinator_js" == *'reviewViolationId'* ]] \
+              && [[ "$coordinator_js" == *'loadRegistry()'* ]]; then
               count="$(python3 -c "import json,sys; print(len(json.load(sys.stdin)['violations']))" <<<"$catalog")"
               test "$count" -ge 170
               echo "PB_MNG catalog: $count violations"
