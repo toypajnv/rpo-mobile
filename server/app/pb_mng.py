@@ -33,6 +33,15 @@ def pb_mng_js():
     return FileResponse(PB_MNG_DIR / "app.js", media_type="application/javascript; charset=utf-8")
 
 
+@router.get("/pb-mng/coordinator.js", include_in_schema=False)
+def pb_mng_coordinator_js():
+    return FileResponse(
+        PB_MNG_DIR / "coordinator.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
+
+
 @router.get("/pb-mng/manifest.webmanifest", include_in_schema=False)
 def pb_mng_manifest():
     return FileResponse(
