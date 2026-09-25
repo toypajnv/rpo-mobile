@@ -44,5 +44,12 @@ jobs:
           Path('/tmp/pb-coordinator.js').write_text(scripts[-1], encoding='utf-8')
           PY
           node --check /tmp/pb-coordinator.js
+          python - <<'PY'
+          from pathlib import Path
+          src = Path('server/app/templates/pb_mng_coordinator.html').read_text(encoding='utf-8')
+          assert src.index('id="photoLightbox"') < src.index('<script>'), 'photoLightbox must be before coordinator script'
+          assert 'async function load(){' in src
+          print('Coordinator DOM startup order OK')
+          PY
       - name: Run PB_MNG workflow test
         run: python -m unittest server.tests.test_pb_mng_workflow -v
