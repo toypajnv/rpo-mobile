@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a467f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ПБ_МНГ">
+  <title>ПБ_МНГ — прототип</title>
+  <link rel="manifest" href="/pb-mng/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/pb-mng/icon-180.png">
+  <link rel="stylesheet" href="/pb-mng/app.css?v=20260925-1">
+  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/pb-mng/sw.js',{scope:'/pb-mng/'}).catch(()=>{});}</script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark">ПБ</div>
+    <div class="brand-copy"><b>ПБ_МНГ</b><span>Производственная безопасность</span></div>
+    <button class="profile-btn" id="profileBtn" aria-label="Профиль">ИИ</button>
+  </header>
+
+  <main id="app">
+    <section class="screen active" data-screen="home">
+      <div class="hero">
+        <span class="eyebrow">ПРОТОТИП · БЕЗ ВХОДА</span>
+        <h1>Что вы хотите сделать?</h1>
+        <p>Единое мобильное приложение для РПО и остановок небезопасных работ.</p>
+      </div>
+
+      <div class="module-grid">
+        <button class="module-card rpo" data-open="rpo">
+          <span class="module-icon">РПО</span><span><b>Работы повышенной опасности</b><small>Этапы РПО, история и передача данных</small></span><i>›</i>
+        </button>
+        <button class="module-card stop" data-open="stopForm">
+          <span class="module-icon">!</span><span><b>Остановить работу</b><small>Зафиксировать нарушение и отправить координатору</small></span><i>›</i>
+        </button>
+      </div>
+
+      <div class="stats-row">
+        <button class="stat-card" data-open="myStops"><b id="activeCount">2</b><span>Мои активные</span></button>
+        <button class="stat-card" data-open="actions"><b>1</b><span>Требует действия</span></button>
+        <div class="stat-card"><b>12</b><span>Закрыто за месяц</span></div>
+      </div>
+
+      <article class="attention-card">
+        <div class="attention-icon">!</div>
+        <div><b>Есть остановка, ожидающая подтверждения устранения</b><p>ОР-2026-00124 · Ограждение опасной зоны</p></div>
+        <button data-open="actions">Открыть</button>
+      </article>
+    </section>
+
+    <section class="screen" data-screen="stopForm">
+      <div class="screen-head"><button class="back" data-open="home">‹</button><div><span>Новая карточка</span><h2>Остановка работ</h2></div></div>
+      <div class="progress"><i class="on"></i><i></i><i></i></div>
+      <form id="stopForm">
+        <div class="form-card">
+          <label>Место / объект<input id="location" required placeholder="Например: Куст №123"></label>
+          <label>Подрядная организация
+            <select id="contractor" required><option value="">Выберите организацию</option><option>ООО «Подрядчик-1»</option><option>ООО «Подрядчик-2»</option><option>АО «Сервис-МНГ»</option></select>
+          </label>
+          <label>Вид работ<select id="workType"><option>Огневые работы</option><option>Газоопасные работы</option><option>Работы на высоте</option><option>Земляные работы</option><option>Иные работы</option></select></label>
+          <label>Выявленное нарушение
+            <select id="violation" required>
+              <option value="">Выберите нарушение</option>
+              <option data-level="Грубое">Работа без требуемой газовой проверки</option>
+              <option data-level="Грубое">Работа на высоте без страховочной системы</option>
+              <option data-level="Значительное">Отсутствует ограждение опасной зоны</option>
+              <option data-level="Значительное">Нарушение требований наряда-допуска</option>
+              <option data-level="Незначительное">Недостатки в организации рабочего места</option>
+            </select>
+          </label>
+          <div class="classification hidden" id="classification"><span>Категория определяется автоматически</span><b id="levelText">—</b></div>
+          <label>Описание<textarea id="description" rows="4" required placeholder="Кратко опишите, что произошло и почему работа остановлена"></textarea></label>
+        </div>
+
+        <div class="form-card">
+          <div class="section-title"><span><b>Фото нарушения</b><small>Добавьте общий план и крупный план нарушения</small></span><em id="photoCount">0/5</em></div>
+          <label class="photo-picker"><input id="photos" type="file" accept="image/*" capture="environment" multiple><span class="camera">＋</span><b>Добавить фото</b><small>Камера или галерея</small></label>
+          <div class="photo-list" id="photoList"></div>
+        </div>
+
+        <div class="form-card compact">
+          <div class="auto-row"><span>Дата и время</span><b id="nowLabel"></b></div>
+          <div class="auto-row"><span>Инициатор</span><b id="workerLabel">Иванов Иван Иванович</b></div>
+        </div>
+        <button class="primary" type="submit">Отправить на верификацию</button>
+        <button class="secondary" id="saveDraft" type="button">Сохранить черновик</button>
+      </form>
+    </section>
+
+    <section class="screen" data-screen="myStops">
+      <div class="screen-head"><button class="back" data-open="home">‹</button><div><span>История</span><h2>Мои остановки</h2></div></div>
+      <div class="filter-chips"><button class="active">Все</button><button>На проверке</button><button>Устранение</button><button>Закрыто</button></div>
+      <div class="list-card">
+        <article><span class="status amber">Ожидает устранения</span><h3>ОР-2026-00124</h3><p>Отсутствует ограждение опасной зоны</p><footer><span>Куст №123</span><b>Сегодня, 10:47</b></footer></article>
+        <article><span class="status blue">На проверке</span><h3>ОР-2026-00125</h3><p>Нарушение требований наряда-допуска</p><footer><span>ДНС-2</span><b>Сегодня, 11:18</b></footer></article>
+        <article><span class="status green">Закрыта</span><h3>ОР-2026-00118</h3><p>Недостатки в организации рабочего места</p><footer><span>ЦППН-1</span><b>23.09.2026</b></footer></article>
+      </div>
+    </section>
+
+    <section class="screen" data-screen="actions">
+      <div class="screen-head"><button class="back" data-open="home">‹</button><div><span>Следующий шаг</span><h2>Подтвердить устранение</h2></div></div>
+      <article class="stop-summary"><div><span class="status amber">ОР-2026-00124</span><h3>Отсутствует ограждение опасной зоны</h3><p>Куст №123 · ООО «Подрядчик-1»</p></div><div class="before-photo">ФОТО<br>ДО</div></article>
+      <div class="form-card">
+        <h3>Работы можно возобновить?</h3>
+        <p class="muted">Подтвердите, что замечание устранено. Приложите фотографию состояния после устранения.</p>
+        <label class="photo-picker"><input id="afterPhoto" type="file" accept="image/*" capture="environment"><span class="camera">＋</span><b>Фото после устранения</b><small id="afterPhotoText">Обязательно для подтверждения</small></label>
+        <label>Комментарий<textarea rows="3" placeholder="Что выполнено"></textarea></label>
+      </div>
+      <button class="primary" id="confirmFix">Подтвердить устранение</button>
+    </section>
+
+    <section class="screen" data-screen="rpo">
+      <div class="screen-head"><button class="back" data-open="home">‹</button><div><span>Модуль</span><h2>РПО</h2></div></div>
+      <div class="placeholder-card"><div class="big-symbol">РПО</div><h3>Существующий модуль РПО</h3><p>В итоговом «ПБ_МНГ» здесь будет текущая логика РПО с тем же сервером и офлайн-режимом.</p><a href="/app/">Открыть действующую PWA РПО</a></div>
+    </section>
+
+    <section class="screen" data-screen="profile">
+      <div class="screen-head"><button class="back" data-open="home">‹</button><div><span>Без пароля и ПИН</span><h2>Мои данные</h2></div></div>
+      <div class="form-card">
+        <label>ФИО<input id="profileName" value="Иванов Иван Иванович"></label>
+        <label>Подразделение<input id="profileUnit" value="ЦДПН-1"></label>
+        <label>Номер пропуска<input id="profilePass" value="12345С"></label>
+        <button class="primary" id="saveProfile" type="button">Сохранить на этом устройстве</button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="active" data-open="home"><span>⌂</span>Главная</button>
+    <button data-open="stopForm"><span>＋</span>Остановить</button>
+    <button data-open="myStops"><span>▤</span>Мои</button>
+    <button data-open="profile"><span>○</span>Профиль</button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+  <script src="/pb-mng/app.js?v=20260925-1" defer></script>
+</body>
+</html>
