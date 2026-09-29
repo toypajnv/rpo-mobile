@@ -36,6 +36,8 @@ class PbMngWorkflowTests(unittest.TestCase):
                 "initiator": {"name": "Иванов Иван Иванович", "unit": "ЦДПН-1", "pass": "77777С"},
                 "occurred_at": "2026-09-25T05:00:00+00:00",
                 "block": catalog["blocks"][0],
+                "work_direction": "ТКРС",
+                "stop_source": "Работник",
                 "structural_unit": "ЦДПН-1",
                 "field": catalog["fields"][0],
                 "location": "Куст №123",
@@ -43,6 +45,8 @@ class PbMngWorkflowTests(unittest.TestCase):
                 "work_type": catalog["work_types"][0],
                 "permit_number": "НД-123",
                 "description": "Тестовая остановка без классификации работником",
+                "participants": [{"fio": "Сидоров Сергей Сергеевич", "position": "Стропальщик", "pass": "54321С"}],
+                "vehicles": [{"vehicle_number": "А001АА", "pass": "90001С", "driver_fio": "Водитель В.В."}],
                 "responsible": {"fio": "Петров Петр Петрович", "position": "Мастер", "pass": "12345С"},
             }
             created = client.post(
@@ -56,6 +60,12 @@ class PbMngWorkflowTests(unittest.TestCase):
             self.assertEqual(created.json()["status"], "pending_verification")
             self.assertEqual(created.json()["violation"]["id"], "")
             self.assertEqual(created.json()["severity_label"], "Не классифицировано")
+            self.assertEqual(created.json()["work_direction"], "ТКРС")
+            self.assertEqual(created.json()["stop_source"], "Работник")
+            self.assertGreaterEqual(len(created.json()["participants"]), 2)
+            self.assertEqual(len(created.json()["vehicles"]), 1)
+            extra_person = next(p for p in created.json()["participants"] if p["role"] == "participant")
+            vehicle = created.json()["vehicles"][0]
 
             own = client.get("/api/pb-mng/my-stops", headers=self.headers())
             self.assertEqual(own.status_code, 200, own.text)
@@ -71,7 +81,7 @@ class PbMngWorkflowTests(unittest.TestCase):
             for expected_status in [
                 "pending_verification", "returned_for_revision", "awaiting_resolution",
                 "resolution_submitted", "resolution_revision", "awaiting_pkm",
-                "awaiting_training", "ready_for_unblock", "closed", "rejected",
+                "awaiting_training", "ready_for_unblock", "awaiting_resumption", "closed", "rejected",
             ]:
                 self.assertIn(expected_status, stats_data["by_status"])
             self.assertGreaterEqual(stats_data["by_status"]["pending_verification"], 1)
@@ -87,15 +97,20 @@ class PbMngWorkflowTests(unittest.TestCase):
                     "measures": ["Работы остановлены до устранения", "Внесен в СТОП-ЛИСТ"],
                     "course_name": "",
                     "pkm_required": False,
-                    "block_responsible": True,
+                    "block_responsible": False,
                     "block_days": None,
+                    "blocked_participant_ids": [extra_person["id"]],
+                    "blocked_vehicle_ids": [vehicle["id"]],
+                    "participant_measures": {str(extra_person["id"]): ["Направлен на ОБУЧЕНИЕ КБ"]},
                 },
             )
             self.assertEqual(reviewed.status_code, 200, reviewed.text)
             self.assertEqual(reviewed.json()["status"], "awaiting_resolution")
             self.assertEqual(reviewed.json()["violation"]["id"], rule["id"])
             self.assertEqual(reviewed.json()["current_severity"], rule["severities"][0])
-            self.assertTrue(reviewed.json()["restrictions"])
+            self.assertEqual(len(reviewed.json()["restrictions"]), 2)
+            reviewed_person = next(p for p in reviewed.json()["participants"] if p["id"] == extra_person["id"])
+            self.assertIn("Направлен на ОБУЧЕНИЕ КБ", reviewed_person["measures"])
 
             registry = client.get("/api/pb-mng/coordinator/stops", params={"q": stop_id, "limit": 1000})
             self.assertEqual(registry.status_code, 200, registry.text)
@@ -127,8 +142,17 @@ class PbMngWorkflowTests(unittest.TestCase):
 
             closed = client.post(f"/api/pb-mng/coordinator/stops/{stop_id}/unblock")
             self.assertEqual(closed.status_code, 200, closed.text)
-            self.assertEqual(closed.json()["status"], "closed")
+            self.assertEqual(closed.json()["status"], "awaiting_resumption")
             self.assertEqual(closed.json()["restrictions"], [])
+            self.assertIsNotNone(closed.json()["resume_allowed_at"])
+
+            resumed = client.post(
+                f"/api/pb-mng/stops/{stop_id}/resume",
+                headers=self.headers(),
+            )
+            self.assertEqual(resumed.status_code, 200, resumed.text)
+            self.assertEqual(resumed.json()["status"], "closed")
+            self.assertIsNotNone(resumed.json()["resumed_at"])
 
 
 if __name__ == "__main__":
