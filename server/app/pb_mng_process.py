@@ -34,7 +34,7 @@ from .pb_mng_models import (
     PbViolationRule,
 )
 from .services.mailer import send_notification
-from .stop_registry import StopRegistryRecord, normalize_pass_number
+from .stop_registry import StopContractRecord, StopRegistryRecord, normalize_pass_number
 
 BASE_DIR = Path(__file__).resolve().parent
 PB_DIR = BASE_DIR / "pb_mng"
@@ -220,6 +220,33 @@ def _vehicles_for_stop(db: Session, stop_id: int) -> list[PbStopVehicle]:
     return db.scalars(select(PbStopVehicle).where(PbStopVehicle.stop_id == stop_id).order_by(PbStopVehicle.id)).all()
 
 
+def _contract_card(db: Session, stop: PbStop) -> dict | None:
+    if not stop.contractor:
+        return None
+    row = db.scalar(
+        select(StopContractRecord)
+        .where(StopContractRecord.company == stop.contractor)
+        .order_by(StopContractRecord.source_row.desc(), StopContractRecord.id.desc())
+        .limit(1)
+    )
+    if not row:
+        return None
+    return {
+        "company": row.company,
+        "contract_number": row.contract_number,
+        "contract_owner": row.contract_owner,
+        "eol": row.eol,
+        "deputy_eol": row.deputy_eol,
+        "contract_engineer": row.contract_engineer,
+        "reserve_engineer": row.reserve_engineer,
+        "hse": row.hse,
+        "onsite_contact": row.onsite_contact,
+        "valid_until": row.valid_until,
+        "risk_level": row.risk_level,
+        "criticality": row.criticality,
+    }
+
+
 def _matching_routes(db: Session, stop: PbStop) -> list[dict]:
     rows = db.scalars(select(PbEmailRoute).where(PbEmailRoute.active.is_(True)).order_by(PbEmailRoute.role, PbEmailRoute.recipient_name)).all()
     result = []
@@ -401,6 +428,7 @@ def _stop_out(stop: PbStop, db: Session, *, include_actions: bool = False) -> di
             }
             for r in active_restrictions
         ],
+        "contract_card": _contract_card(db, stop),
         "recipient_routes": _matching_routes(db, stop),
         "history": history,
         "mail_status": stop.mail_status,
