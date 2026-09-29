@@ -286,12 +286,15 @@ def _history_for_stop(db: Session, stop: PbStop, participants: list[PbStopPartic
                 "measures": latest_legacy.measures,
             } if latest_legacy else None,
         })
-    contractor_digital = db.scalar(
-        select(func.count(PbStop.id)).where(PbStop.id != stop.id, PbStop.contractor == stop.contractor)
-    ) or 0 if stop.contractor else 0
-    contractor_legacy = db.scalar(
-        select(func.count(StopRegistryRecord.id)).where(StopRegistryRecord.company == stop.contractor)
-    ) or 0 if stop.contractor else 0
+    contractor_digital = 0
+    contractor_legacy = 0
+    if stop.contractor:
+        contractor_digital = db.scalar(
+            select(func.count(PbStop.id)).where(PbStop.id != stop.id, PbStop.contractor == stop.contractor)
+        ) or 0
+        contractor_legacy = db.scalar(
+            select(func.count(StopRegistryRecord.id)).where(StopRegistryRecord.company == stop.contractor)
+        ) or 0
     return {
         "people": people,
         "contractor": {
@@ -497,7 +500,19 @@ def _next_after_conditions(stop: PbStop) -> str:
     if stop.course_status == "required":
         return "awaiting_training"
     has_active = any(r.active and (r.ends_at is None or (_as_utc(r.ends_at) or utcnow()) > utcnow()) for r in stop.restrictions)
-    return "ready_for_unblock" if has_active else "closed"
+    return "ready_for_unblock" if has_active else "awaiting_resumption"
+
+
+def _stamp_resume_allowed(db: Session, stop: PbStop) -> None:
+    if stop.status != "awaiting_resumption":
+        return
+    extra = _extra_for_stop(db, stop.id)
+    if not extra:
+        extra = PbStopExtra(stop_id=stop.id)
+        db.add(extra)
+    if not extra.resume_allowed_at:
+        extra.resume_allowed_at = utcnow()
+    extra.updated_at = utcnow()
 
 
 class ResolutionReviewPayload(BaseModel):
@@ -986,8 +1001,7 @@ def review_resolution(public_id: str, payload: ResolutionReviewPayload, db: Sess
     elif payload.action == "accept":
         stop.resolution_confirmed_at = utcnow()
         stop.status = _next_after_conditions(stop)
-        if stop.status == "closed":
-            stop.closed_at = utcnow()
+        _stamp_resume_allowed(db, stop)
         _audit(db, stop, "coordinator", operator.username, "resolution_accepted", {"next_status": stop.status})
     else:
         raise HTTPException(status_code=400, detail="Неизвестное решение")
@@ -1032,8 +1046,7 @@ def course_passed(public_id: str, db: Session = Depends(get_db), operator: Opera
     stop.course_status = "passed"
     if stop.resolution_confirmed_at and (not stop.pkm_required or stop.pkm_status == "accepted"):
         stop.status = _next_after_conditions(stop)
-        if stop.status == "closed":
-            stop.closed_at = utcnow()
+        _stamp_resume_allowed(db, stop)
     stop.updated_at = utcnow()
     _audit(db, stop, "coordinator", operator.username, "course_passed", {"course": stop.course_name, "next_status": stop.status})
     db.commit()
@@ -1175,15 +1188,28 @@ def export_stops(db: Session = Depends(get_db), operator: Operator = Depends(coo
         closed = stop.closed_at.astimezone() if stop.closed_at else None
         ws.append([
             stop.public_id,
-            dt.strftime("%d.%m.%Y"), dt.strftime("%H:%M"), stop.block, stop.initiator_unit,
+            dt.strftime("%d.%m.%Y"), dt.strftime("%H:%M"), stop.block,
+            (_extra_for_stop(db, stop.id).work_direction if _extra_for_stop(db, stop.id) else stop.initiator_unit),
             SEVERITY_LABELS.get(stop.current_severity, stop.current_severity), stop.structural_unit, stop.field_name,
             stop.location, stop.contractor, stop.subcontractor, stop.work_type, stop.permit_number, stop.violation_barrier,
-            stop.violation_text, stop.responsible_fio, stop.responsible_position, "", stop.responsible_pass,
-            stop.supervisor_fio, f"{stop.initiator_name} / {stop.initiator_unit}", "", ", ".join(_json(stop.measures_json, [])), "",
-            "Да" if stop.resolution_confirmed_at else "Нет", closed.strftime("%d.%m.%Y") if closed else "", closed.strftime("%H:%M") if closed else "", "",
+            stop.violation_text,
+            "; ".join([p.fio for p in _participants_for_stop(db, stop.id) if p.fio]) or stop.responsible_fio,
+            "; ".join([p.position for p in _participants_for_stop(db, stop.id) if p.position]) or stop.responsible_position,
+            "; ".join([v.pass_number for v in _vehicles_for_stop(db, stop.id) if v.pass_number]),
+            "; ".join([p.pass_number for p in _participants_for_stop(db, stop.id) if p.pass_number]) or stop.responsible_pass,
+            stop.supervisor_fio,
+            f"{stop.initiator_name} / {stop.initiator_unit}",
+            "Да" if (_extra_for_stop(db, stop.id) and _extra_for_stop(db, stop.id).stop_source == "Видеоаналитика") else "Нет",
+            ", ".join(_json(stop.measures_json, [])), "",
+            "Да" if stop.resolution_confirmed_at else "Нет",
+            (_extra_for_stop(db, stop.id).resumed_at.astimezone().strftime("%d.%m.%Y") if _extra_for_stop(db, stop.id) and _extra_for_stop(db, stop.id).resumed_at else ""),
+            (_extra_for_stop(db, stop.id).resumed_at.astimezone().strftime("%H:%M") if _extra_for_stop(db, stop.id) and _extra_for_stop(db, stop.id).resumed_at else ""),
+            "",
             stop.course_name, "Да" if stop.course_status in {"passed", "not_required"} else "Нет" if stop.course_status == "required" else "",
             "Да" if stop.pkm_status == "accepted" else "Не требуется" if stop.pkm_status == "not_required" else "Нет",
-            "Запрещен" if restriction_active else "Разрешен", "", ""
+            "Запрещен" if any(r.active and r.restriction_kind == "personnel" for r in stop.restrictions) else "Разрешен",
+            "Запрещен" if any(r.active and r.restriction_kind == "vehicle" for r in stop.restrictions) else "Разрешен",
+            ""
         ])
     ws.freeze_panes = "A2"
     for col in range(1, len(headers) + 1):
