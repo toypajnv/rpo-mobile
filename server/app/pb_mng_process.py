@@ -974,13 +974,26 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
         stop.pkm_status = "required" if stop.pkm_required else "not_required"
         stop.verified_at = utcnow()
         stop.verified_by_id = operator.id
-        should_block = bool(payload.block_responsible) or any("СТОП-ЛИСТ" in str(m).upper() for m in selected_measures)
-        if should_block and stop.responsible_pass:
-            ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
-            stop.block_until = ends_at
-            db.add(PbAccessRestriction(stop_id=stop.id, pass_number=normalize_pass_number(stop.responsible_pass) or stop.responsible_pass, fio=stop.responsible_fio, restriction_kind="personnel", reason=stop.violation_text, ends_at=ends_at, active=True))
         participant_rows = {p.id: p for p in _participants_for_stop(db, stop.id)}
         vehicle_rows = {v.id: v for v in _vehicles_for_stop(db, stop.id)}
+        explicit_entity_blocks = bool(payload.blocked_participant_ids or payload.blocked_vehicle_ids)
+        stoplist_selected = any("СТОП-ЛИСТ" in str(m).upper() for m in selected_measures)
+        # Backward-compatible default: a generic STOP-list measure blocks the responsible
+        # only when the coordinator has not explicitly selected individual people/vehicles.
+        should_block_responsible = bool(payload.block_responsible) or (stoplist_selected and not explicit_entity_blocks)
+        ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
+        if should_block_responsible and stop.responsible_pass:
+            stop.block_until = ends_at
+            db.add(PbAccessRestriction(
+                stop_id=stop.id,
+                pass_number=normalize_pass_number(stop.responsible_pass) or stop.responsible_pass,
+                fio=stop.responsible_fio,
+                restriction_kind="personnel",
+                reason=stop.violation_text,
+                ends_at=ends_at,
+                active=True,
+            ))
+
         for participant_id_text, measures in (payload.participant_measures or {}).items():
             try:
                 participant_id = int(participant_id_text)
@@ -990,7 +1003,7 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
             if person:
                 cleaned = [_clean(item, 300) for item in (measures or []) if _clean(item, 300)]
                 person.measures_json = json.dumps(cleaned, ensure_ascii=False)
-        ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
+
         for participant_id in payload.blocked_participant_ids:
             person = participant_rows.get(participant_id)
             if person and person.pass_number:
@@ -1015,7 +1028,23 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
                     ends_at=ends_at,
                     active=True,
                 ))
-                _audit(db, stop, "coordinator", operator.username, "verified", {"violation_id": rule.id, "severity": severity, "severity_context": severity_context, "measures": _json(stop.measures_json, []), "block": bool(should_block)})
+
+        _audit(
+            db,
+            stop,
+            "coordinator",
+            operator.username,
+            "verified",
+            {
+                "violation_id": rule.id,
+                "severity": severity,
+                "severity_context": severity_context,
+                "measures": _json(stop.measures_json, []),
+                "block_responsible": bool(should_block_responsible),
+                "blocked_participant_ids": payload.blocked_participant_ids,
+                "blocked_vehicle_ids": payload.blocked_vehicle_ids,
+            },
+        )
         _notify_verified(db, stop)
     else:
         raise HTTPException(status_code=400, detail="Неизвестное решение координатора")
