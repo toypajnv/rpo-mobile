@@ -25,7 +25,7 @@ jobs:
             openapi="$(curl -fsS --max-time 10 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
             coordinator_js="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/coordinator.js 2>/dev/null || true)"
             if [[ "$page" == *'РПО и полный цикл остановки'* ]] \
-              && [[ "$sw" == *'pb-mng-v1-20260925-6'* ]] \
+              && [[ "$sw" == *'pb-mng-v1-20260929-9'* ]] \
               && [[ "$catalog" == *'"violations"'* ]] \
               && [[ "$catalog" == *'"minor_reclassify_minutes":60'* ]] \
               && [[ "$openapi" == *'"/api/pb-mng/stops"'* ]] \
@@ -36,7 +36,10 @@ jobs:
               && [[ "$coordinator_js" == *'loadRegistry()'* ]] \
               && [[ "$coordinator_js" == *'applyQueueFilter'* ]] \
               && [[ "$coordinator_js" == *'ready_for_unblock'* ]] \
-              && [[ "$coordinator_js" == *'nextActionHtml'* ]]; then
+              && [[ "$coordinator_js" == *'nextActionHtml'* ]] \
+              && [[ "$coordinator_js" == *'awaiting_resumption'* ]] \
+              && [[ "$coordinator_js" == *'peopleAndVehiclesHtml'* ]] \
+              && [[ "$openapi" == *'"/api/pb-mng/stops/{public_id}/resume"'* ]]; then
               count="$(python3 -c "import json,sys; print(len(json.load(sys.stdin)['violations']))" <<<"$catalog")"
               test "$count" -ge 170
               echo "PB_MNG catalog: $count violations"
