@@ -492,6 +492,7 @@ class ReviewPayload(BaseModel):
     block_days: int | None = Field(default=None, ge=1, le=365)
     blocked_participant_ids: list[int] = Field(default_factory=list)
     blocked_vehicle_ids: list[int] = Field(default_factory=list)
+    participant_measures: dict[str, list[str]] = Field(default_factory=dict)
 
 
 def _next_after_conditions(stop: PbStop) -> str:
@@ -952,6 +953,15 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
             db.add(PbAccessRestriction(stop_id=stop.id, pass_number=normalize_pass_number(stop.responsible_pass) or stop.responsible_pass, fio=stop.responsible_fio, restriction_kind="personnel", reason=stop.violation_text, ends_at=ends_at, active=True))
         participant_rows = {p.id: p for p in _participants_for_stop(db, stop.id)}
         vehicle_rows = {v.id: v for v in _vehicles_for_stop(db, stop.id)}
+        for participant_id_text, measures in (payload.participant_measures or {}).items():
+            try:
+                participant_id = int(participant_id_text)
+            except Exception:
+                continue
+            person = participant_rows.get(participant_id)
+            if person:
+                cleaned = [_clean(item, 300) for item in (measures or []) if _clean(item, 300)]
+                person.measures_json = json.dumps(cleaned, ensure_ascii=False)
         ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
         for participant_id in payload.blocked_participant_ids:
             person = participant_rows.get(participant_id)
