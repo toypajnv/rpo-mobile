@@ -42,6 +42,26 @@ class StopRegistryRecord(Base):
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
+class StopContractRecord(Base):
+    __tablename__ = "stop_contract_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company: Mapped[str] = mapped_column(String(300), default="", index=True)
+    contract_number: Mapped[str] = mapped_column(String(160), default="", index=True)
+    contract_owner: Mapped[str] = mapped_column(String(240), default="")
+    eol: Mapped[str] = mapped_column(String(240), default="")
+    deputy_eol: Mapped[str] = mapped_column(String(240), default="")
+    contract_engineer: Mapped[str] = mapped_column(String(240), default="")
+    reserve_engineer: Mapped[str] = mapped_column(String(240), default="")
+    hse: Mapped[str] = mapped_column(String(240), default="")
+    onsite_contact: Mapped[str] = mapped_column(String(240), default="")
+    valid_until: Mapped[str] = mapped_column(String(80), default="")
+    risk_level: Mapped[str] = mapped_column(String(120), default="")
+    criticality: Mapped[str] = mapped_column(String(120), default="")
+    source_row: Mapped[int] = mapped_column(Integer, default=0)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class StopRegistryImport(Base):
     __tablename__ = "stop_registry_imports"
 
@@ -195,6 +215,105 @@ def parse_registry(path: str | Path) -> tuple[list[ParsedStopRecord], int]:
     return records, source_rows
 
 
+def parse_contract_directory(path: str | Path) -> list[dict]:
+    """Read the optional contract directory without depending on fixed column numbers."""
+    aliases = {
+        "company": ("ПОДРЯД", "ОРГАНИЗАЦ"),
+        "contract_number": ("ДОГОВОР",),
+        "contract_owner": ("ВЛАДЕЛ", "ДОГОВОР"),
+        "eol": ("ЕОЛ",),
+        "deputy_eol": ("ЗАМЕЩ", "ЕОЛ"),
+        "contract_engineer": ("КОНТРАКТ", "ИНЖЕНЕР"),
+        "reserve_engineer": ("РЕЗЕРВ", "ИНЖЕНЕР"),
+        "hse": ("HSE",),
+        "onsite_contact": ("ИСПОЛНИТ", "МЕСТ"),
+        "valid_until": ("СРОК", "ДЕЙСТВ"),
+        "risk_level": ("УРОВ", "РИСК"),
+        "criticality": ("КРИТИЧ",),
+    }
+
+    def match_index(headers: list[str], parts: tuple[str, ...], *, exclude: tuple[str, ...] = ()) -> int | None:
+        for idx, header in enumerate(headers):
+            if all(part in header for part in parts) and not any(word in header for word in exclude):
+                return idx
+        return None
+
+    try:
+        with open_workbook(str(path)) as workbook:
+            sheet_name = next((name for name in workbook.sheets if "ДОГОВ" in _header(name)), "")
+            if not sheet_name:
+                return []
+            rows = []
+            with workbook.get_sheet(sheet_name) as sheet:
+                header_row_index = 0
+                header_values: list[str] = []
+                raw_rows: list[tuple[int, list[object]]] = []
+                for row_index, row in enumerate(sheet.rows(), start=1):
+                    values = [cell.v for cell in row]
+                    raw_rows.append((row_index, values))
+                    normalized = [_header(value) for value in values]
+                    joined = " | ".join(normalized)
+                    if row_index <= 25 and "ПОДРЯД" in joined and ("ДОГОВОР" in joined or "ЕОЛ" in joined):
+                        header_row_index = row_index
+                        header_values = normalized
+                        break
+                if not header_row_index:
+                    return []
+
+                indexes = {
+                    "company": match_index(header_values, aliases["company"]),
+                    "contract_number": match_index(header_values, aliases["contract_number"], exclude=("ВЛАДЕЛ",)),
+                    "contract_owner": match_index(header_values, aliases["contract_owner"]),
+                    "deputy_eol": match_index(header_values, aliases["deputy_eol"]),
+                    "contract_engineer": match_index(header_values, aliases["contract_engineer"], exclude=("РЕЗЕРВ",)),
+                    "reserve_engineer": match_index(header_values, aliases["reserve_engineer"]),
+                    "hse": match_index(header_values, aliases["hse"]),
+                    "onsite_contact": match_index(header_values, aliases["onsite_contact"]),
+                    "valid_until": match_index(header_values, aliases["valid_until"]),
+                    "risk_level": match_index(header_values, aliases["risk_level"]),
+                    "criticality": match_index(header_values, aliases["criticality"]),
+                }
+                # EOL must not accidentally resolve to "замещающий ЕОЛ".
+                indexes["eol"] = next(
+                    (idx for idx, header in enumerate(header_values) if "ЕОЛ" in header and "ЗАМЕЩ" not in header),
+                    None,
+                )
+                if indexes["company"] is None:
+                    return []
+
+                # Re-open so rows after the discovered header are streamed normally.
+            with workbook.get_sheet(sheet_name) as sheet:
+                for row_index, row in enumerate(sheet.rows(), start=1):
+                    if row_index <= header_row_index:
+                        continue
+                    values = [cell.v for cell in row]
+                    def value(key: str) -> str:
+                        idx = indexes.get(key)
+                        return _text(values[idx]) if idx is not None and idx < len(values) else ""
+                    company = value("company")
+                    if not company:
+                        continue
+                    rows.append({
+                        "company": company,
+                        "contract_number": value("contract_number"),
+                        "contract_owner": value("contract_owner"),
+                        "eol": value("eol"),
+                        "deputy_eol": value("deputy_eol"),
+                        "contract_engineer": value("contract_engineer"),
+                        "reserve_engineer": value("reserve_engineer"),
+                        "hse": value("hse"),
+                        "onsite_contact": value("onsite_contact"),
+                        "valid_until": value("valid_until"),
+                        "risk_level": value("risk_level"),
+                        "criticality": value("criticality"),
+                        "source_row": row_index,
+                    })
+            return rows
+    except Exception:
+        # Contract data is useful context, but must never break the safety registry import.
+        return []
+
+
 def sha256_file(path: str | Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as source:
@@ -217,8 +336,10 @@ def import_registry(
         return ImportResult(True, previous.source_rows, previous.indexed_rows, previous.unique_passes, file_hash)
 
     parsed, source_rows = parse_registry(path)
+    contracts = parse_contract_directory(path)
     imported_at = utcnow()
     db.execute(delete(StopRegistryRecord))
+    db.execute(delete(StopContractRecord))
     db.add_all(
         StopRegistryRecord(
             pass_number=item.pass_number,
@@ -238,6 +359,27 @@ def import_registry(
         )
         for item in parsed
     )
+    if contracts:
+        db.add_all(
+            StopContractRecord(
+                company=item["company"],
+                contract_number=item["contract_number"],
+                contract_owner=item["contract_owner"],
+                eol=item["eol"],
+                deputy_eol=item["deputy_eol"],
+                contract_engineer=item["contract_engineer"],
+                reserve_engineer=item["reserve_engineer"],
+                hse=item["hse"],
+                onsite_contact=item["onsite_contact"],
+                valid_until=item["valid_until"],
+                risk_level=item["risk_level"],
+                criticality=item["criticality"],
+                source_row=item["source_row"],
+                imported_at=imported_at,
+            )
+            for item in contracts
+        )
+
     unique_passes = len({item.pass_number for item in parsed})
     db.add(
         StopRegistryImport(
