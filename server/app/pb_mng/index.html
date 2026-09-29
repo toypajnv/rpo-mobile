@@ -10,7 +10,7 @@
   <title>ПБ_МНГ</title>
   <link rel="manifest" href="/pb-mng/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/pb-mng/icon-180.png">
-  <link rel="stylesheet" href="/pb-mng/app.css?v=20260925-6">
+  <link rel="stylesheet" href="/pb-mng/app.css?v=20260929-9">
   <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/pb-mng/sw.js',{scope:'/pb-mng/'}).then(r=>r.update()).catch(()=>{});}</script>
 </head>
 <body>
@@ -45,12 +45,14 @@
     <form id="stopForm">
       <div class="form-card">
         <label>Блок<select id="block" required><option value="">Выберите блок</option></select></label>
+        <label>Направление работ<select id="workDirection"><option value="">Выберите направление</option></select></label>
         <label>Структурное подразделение<select id="structuralUnit"><option value="">Выберите подразделение</option></select></label>
         <label>Месторождение<select id="field"><option value="">Выберите месторождение</option></select></label>
         <label>Место производства работ<input id="location" required placeholder="Например: Куст №123, скважина 45"></label>
         <label>Подрядная организация<input id="contractor" list="contractorList" required placeholder="Начните вводить наименование"><datalist id="contractorList"></datalist></label>
         <label>Субподрядная организация<input id="subcontractor" placeholder="Если есть"></label>
         <label>Вид работ<select id="workType" required><option value="">Выберите вид работ</option></select></label>
+        <label>Источник остановки<select id="stopSource"><option value="">Выберите источник</option></select></label>
         <label>№ наряда-допуска / РПО<input id="permitNumber" placeholder="Если работа выполняется по НД"></label>
       </div>
 
@@ -65,6 +67,16 @@
         <label>ФИО<input id="responsibleFio" required placeholder="Фамилия Имя Отчество"></label>
         <label>Должность / профессия<input id="responsiblePosition" placeholder="Например: мастер"></label>
         <label>№ пропуска<input id="responsiblePass" placeholder="Например: 12345С"></label>
+      </div>
+
+      <div class="form-card">
+        <div class="repeat-head"><div><h3 class="form-title">Другие участники</h3><p>Добавьте только тех работников, которых касается остановка.</p></div><button class="mini-add" id="addParticipant" type="button">+ Участник</button></div>
+        <div class="repeat-list" id="participantsList"><div class="repeat-empty">Дополнительных участников нет</div></div>
+      </div>
+
+      <div class="form-card">
+        <div class="repeat-head"><div><h3 class="form-title">Транспорт / техника</h3><p>Заполняется, если остановка связана с ТС или его пропуском.</p></div><button class="mini-add" id="addVehicle" type="button">+ ТС</button></div>
+        <div class="repeat-list" id="vehiclesList"><div class="repeat-empty">Транспорт не добавлен</div></div>
       </div>
 
       <div class="form-card">
@@ -104,6 +116,11 @@
       <label>ПКМ<textarea id="pkmText" rows="6" placeholder="Мероприятие — срок — ответственный"></textarea></label>
       <button class="primary" id="submitPkm" type="button">Отправить ПКМ координатору</button>
     </div>
+    <div class="form-card hidden resume-card" id="resumeBox">
+      <h3>Работы разрешено возобновить</h3>
+      <p class="muted">После фактического возобновления подтвердите это действие. Дата и время сохранятся в реестре.</p>
+      <button class="primary" id="confirmResume" type="button">Подтвердить фактическое возобновление</button>
+    </div>
     <div class="form-card hidden" id="revisionBox">
       <h3>Координатор вернул карточку</h3><p id="revisionText" class="muted"></p>
       <label>Исправленное описание<textarea id="revisionDescription" rows="4"></textarea></label>
@@ -121,6 +138,8 @@
     <div class="screen-head"><button class="back" data-open="home">‹</button><div><span>Без логина и ПИН</span><h2>Мои данные</h2></div></div>
     <div class="form-card">
       <label>ФИО<input id="profileName" placeholder="Фамилия Имя Отчество"></label>
+      <label>Должность<input id="profilePosition" placeholder="Например: специалист ПБ"></label>
+      <label>Блок<input id="profileBlock" placeholder="Например: Блок ЗГДпоПиЭБ"></label>
       <label>Подразделение<input id="profileUnit" placeholder="Например: ЦДПН-1"></label>
       <label>№ пропуска<input id="profilePass" placeholder="Например: 12345С"></label>
       <button class="primary" id="saveProfile" type="button">Сохранить на этом устройстве</button>
@@ -136,6 +155,6 @@
   <button data-open="profile"><span>○</span>Профиль</button>
 </nav>
 <div class="toast" id="toast"></div>
-<script src="/pb-mng/app.js?v=20260925-6" defer></script>
+<script src="/pb-mng/app.js?v=20260929-9" defer></script>
 </body>
 </html>
