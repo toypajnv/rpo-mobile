@@ -8,7 +8,7 @@ import unicodedata
 from pathlib import Path
 
 from pyxlsb import open_workbook
-from sqlalchemy import DateTime, Integer, String, Text, delete, select
+from sqlalchemy import DateTime, Integer, String, Text, delete, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .database import Base
@@ -333,6 +333,31 @@ def import_registry(
     file_hash = sha256_file(path)
     previous = db.scalar(select(StopRegistryImport).where(StopRegistryImport.file_hash == file_hash))
     if previous:
+        # A repeated file can backfill the contract directory after this feature was introduced.
+        if not (db.scalar(select(func.count(StopContractRecord.id))) or 0):
+            contracts = parse_contract_directory(path)
+            if contracts:
+                imported_at = utcnow()
+                db.add_all(
+                    StopContractRecord(
+                        company=item["company"],
+                        contract_number=item["contract_number"],
+                        contract_owner=item["contract_owner"],
+                        eol=item["eol"],
+                        deputy_eol=item["deputy_eol"],
+                        contract_engineer=item["contract_engineer"],
+                        reserve_engineer=item["reserve_engineer"],
+                        hse=item["hse"],
+                        onsite_contact=item["onsite_contact"],
+                        valid_until=item["valid_until"],
+                        risk_level=item["risk_level"],
+                        criticality=item["criticality"],
+                        source_row=item["source_row"],
+                        imported_at=imported_at,
+                    )
+                    for item in contracts
+                )
+                db.commit()
         return ImportResult(True, previous.source_rows, previous.indexed_rows, previous.unique_passes, file_hash)
 
     parsed, source_rows = parse_registry(path)
