@@ -148,3 +148,49 @@ class PbEmailRoute(Base):
     email: Mapped[str] = mapped_column(String(320), index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PbStopExtra(Base):
+    """Additive one-to-one details so the live pb_stops table needs no ALTER migration."""
+    __tablename__ = "pb_stop_extra"
+    __table_args__ = (UniqueConstraint("stop_id", name="uq_pb_stop_extra_stop_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stop_id: Mapped[int] = mapped_column(ForeignKey("pb_stops.id", ondelete="CASCADE"), unique=True, index=True)
+    work_direction: Mapped[str] = mapped_column(String(180), default="", index=True)
+    stop_source: Mapped[str] = mapped_column(String(120), default="Работник", index=True)
+    initiator_position: Mapped[str] = mapped_column(String(240), default="")
+    initiator_block: Mapped[str] = mapped_column(String(160), default="")
+    coordinator_note: Mapped[str] = mapped_column(Text, default="")
+    resume_allowed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    resumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    resumed_by_name: Mapped[str] = mapped_column(String(240), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PbStopParticipant(Base):
+    __tablename__ = "pb_stop_participants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stop_id: Mapped[int] = mapped_column(ForeignKey("pb_stops.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(40), default="participant", index=True)
+    fio: Mapped[str] = mapped_column(String(240), default="", index=True)
+    position: Mapped[str] = mapped_column(String(240), default="")
+    pass_number: Mapped[str] = mapped_column(String(60), default="", index=True)
+    measures_json: Mapped[str] = mapped_column(Text, default="[]")
+    course_name: Mapped[str] = mapped_column(String(300), default="")
+    course_status: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PbStopVehicle(Base):
+    __tablename__ = "pb_stop_vehicles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stop_id: Mapped[int] = mapped_column(ForeignKey("pb_stops.id", ondelete="CASCADE"), index=True)
+    vehicle_number: Mapped[str] = mapped_column(String(80), default="", index=True)
+    pass_number: Mapped[str] = mapped_column(String(60), default="", index=True)
+    driver_fio: Mapped[str] = mapped_column(String(240), default="")
+    company: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
