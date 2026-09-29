@@ -28,6 +28,9 @@ from .pb_mng_models import (
     PbEmailRoute,
     PbPhoto,
     PbStop,
+    PbStopExtra,
+    PbStopParticipant,
+    PbStopVehicle,
     PbViolationRule,
 )
 from .services.mailer import send_notification
@@ -54,6 +57,7 @@ STATUS_LABELS = {
     "awaiting_pkm": "Ожидается ПКМ",
     "awaiting_training": "Ожидается обучение",
     "ready_for_unblock": "Готово к снятию блокировки",
+    "awaiting_resumption": "Разрешено возобновление",
     "closed": "Закрыта",
 }
 
@@ -204,16 +208,124 @@ def _photo_out(photo: PbPhoto) -> dict:
     }
 
 
+def _extra_for_stop(db: Session, stop_id: int) -> PbStopExtra | None:
+    return db.scalar(select(PbStopExtra).where(PbStopExtra.stop_id == stop_id))
+
+
+def _participants_for_stop(db: Session, stop_id: int) -> list[PbStopParticipant]:
+    return db.scalars(select(PbStopParticipant).where(PbStopParticipant.stop_id == stop_id).order_by(PbStopParticipant.id)).all()
+
+
+def _vehicles_for_stop(db: Session, stop_id: int) -> list[PbStopVehicle]:
+    return db.scalars(select(PbStopVehicle).where(PbStopVehicle.stop_id == stop_id).order_by(PbStopVehicle.id)).all()
+
+
+def _matching_routes(db: Session, stop: PbStop) -> list[dict]:
+    rows = db.scalars(select(PbEmailRoute).where(PbEmailRoute.active.is_(True)).order_by(PbEmailRoute.role, PbEmailRoute.recipient_name)).all()
+    result = []
+    for route in rows:
+        if route.block and route.block != stop.block:
+            continue
+        if route.contractor and route.contractor != stop.contractor:
+            continue
+        result.append({
+            "id": route.id,
+            "role": route.role,
+            "name": route.recipient_name,
+            "email": route.email,
+            "block": route.block,
+            "contractor": route.contractor,
+        })
+    return result
+
+
+def _history_for_stop(db: Session, stop: PbStop, participants: list[PbStopParticipant]) -> dict:
+    people = []
+    seen = set()
+    candidate_passes = []
+    if stop.responsible_pass:
+        candidate_passes.append((stop.responsible_fio, stop.responsible_pass))
+    for person in participants:
+        if person.pass_number:
+            candidate_passes.append((person.fio, person.pass_number))
+    for fio, pass_number in candidate_passes:
+        canonical = normalize_pass_number(pass_number) or pass_number
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        digital_responsible = db.scalar(
+            select(func.count(PbStop.id)).where(
+                PbStop.id != stop.id,
+                PbStop.responsible_pass == canonical,
+            )
+        ) or 0
+        digital_participant = db.scalar(
+            select(func.count(PbStopParticipant.id)).where(
+                PbStopParticipant.stop_id != stop.id,
+                PbStopParticipant.pass_number == canonical,
+            )
+        ) or 0
+        legacy = db.scalar(select(func.count(StopRegistryRecord.id)).where(StopRegistryRecord.pass_number == canonical)) or 0
+        total = digital_responsible + digital_participant + legacy
+        latest_legacy = db.scalar(
+            select(StopRegistryRecord)
+            .where(StopRegistryRecord.pass_number == canonical)
+            .order_by(StopRegistryRecord.record_date.desc(), StopRegistryRecord.id.desc())
+            .limit(1)
+        )
+        people.append({
+            "fio": fio,
+            "pass_number": canonical,
+            "digital_count": digital_responsible + digital_participant,
+            "legacy_count": legacy,
+            "total_previous": total,
+            "repeat": total > 0,
+            "latest_legacy": {
+                "date": latest_legacy.record_date,
+                "reason": latest_legacy.stop_reason,
+                "measures": latest_legacy.measures,
+            } if latest_legacy else None,
+        })
+    contractor_digital = db.scalar(
+        select(func.count(PbStop.id)).where(PbStop.id != stop.id, PbStop.contractor == stop.contractor)
+    ) or 0 if stop.contractor else 0
+    contractor_legacy = db.scalar(
+        select(func.count(StopRegistryRecord.id)).where(StopRegistryRecord.company == stop.contractor)
+    ) or 0 if stop.contractor else 0
+    return {
+        "people": people,
+        "contractor": {
+            "name": stop.contractor,
+            "digital_count": contractor_digital,
+            "legacy_count": contractor_legacy,
+            "total_previous": contractor_digital + contractor_legacy,
+        },
+        "repeat": any(item["repeat"] for item in people),
+    }
+
+
 def _stop_out(stop: PbStop, db: Session, *, include_actions: bool = False) -> dict:
     _effective_severity(stop, db)
     active_restrictions = [r for r in stop.restrictions if r.active and (r.ends_at is None or (_as_utc(r.ends_at) or utcnow()) > utcnow())]
+    extra = _extra_for_stop(db, stop.id)
+    participants = _participants_for_stop(db, stop.id)
+    vehicles = _vehicles_for_stop(db, stop.id)
+    history = _history_for_stop(db, stop, participants)
     result = {
         "id": stop.public_id,
-        "initiator": {"name": stop.initiator_name, "unit": stop.initiator_unit, "pass": stop.initiator_pass},
+        "initiator": {
+            "name": stop.initiator_name,
+            "unit": stop.initiator_unit,
+            "pass": stop.initiator_pass,
+            "position": extra.initiator_position if extra else "",
+            "block": extra.initiator_block if extra else "",
+        },
         "occurred_at": stop.occurred_at.isoformat(),
         "created_at": stop.created_at.isoformat(),
         "updated_at": stop.updated_at.isoformat(),
         "block": stop.block,
+        "work_direction": extra.work_direction if extra else "",
+        "stop_source": extra.stop_source if extra else "Работник",
         "structural_unit": stop.structural_unit,
         "field": stop.field_name,
         "location": stop.location,
@@ -232,11 +344,35 @@ def _stop_out(stop: PbStop, db: Session, *, include_actions: bool = False) -> di
         "severity_context": stop.severity_context,
         "description": stop.description,
         "responsible": {"fio": stop.responsible_fio, "position": stop.responsible_position, "pass": stop.responsible_pass},
+        "participants": [
+            {
+                "id": p.id,
+                "role": p.role,
+                "fio": p.fio,
+                "position": p.position,
+                "pass": p.pass_number,
+                "measures": _json(p.measures_json, []),
+                "course_name": p.course_name,
+                "course_status": p.course_status,
+            }
+            for p in participants
+        ],
+        "vehicles": [
+            {
+                "id": v.id,
+                "vehicle_number": v.vehicle_number,
+                "pass": v.pass_number,
+                "driver_fio": v.driver_fio,
+                "company": v.company,
+            }
+            for v in vehicles
+        ],
         "crew": _json(stop.crew_json, []),
         "supervisor": {"fio": stop.supervisor_fio, "pass": stop.supervisor_pass},
         "status": stop.status,
         "status_label": STATUS_LABELS.get(stop.status, stop.status),
         "verification_note": stop.verification_note,
+        "coordinator_note": extra.coordinator_note if extra else "",
         "measures": _json(stop.measures_json, []),
         "course_name": stop.course_name,
         "course_status": stop.course_status,
@@ -245,7 +381,11 @@ def _stop_out(stop: PbStop, db: Session, *, include_actions: bool = False) -> di
         "pkm_text": stop.pkm_text,
         "resolution_comment": stop.resolution_comment,
         "resolution_submitted_at": stop.resolution_submitted_at.isoformat() if stop.resolution_submitted_at else None,
+        "resolution_confirmed_at": stop.resolution_confirmed_at.isoformat() if stop.resolution_confirmed_at else None,
         "verified_at": stop.verified_at.isoformat() if stop.verified_at else None,
+        "resume_allowed_at": extra.resume_allowed_at.isoformat() if extra and extra.resume_allowed_at else None,
+        "resumed_at": extra.resumed_at.isoformat() if extra and extra.resumed_at else None,
+        "resumed_by_name": extra.resumed_by_name if extra else "",
         "closed_at": stop.closed_at.isoformat() if stop.closed_at else None,
         "photos": [_photo_out(x) for x in sorted(stop.photos, key=lambda p: p.created_at)],
         "restrictions": [
@@ -258,6 +398,8 @@ def _stop_out(stop: PbStop, db: Session, *, include_actions: bool = False) -> di
             }
             for r in active_restrictions
         ],
+        "recipient_routes": _matching_routes(db, stop),
+        "history": history,
         "mail_status": stop.mail_status,
     }
     if include_actions:
@@ -345,6 +487,8 @@ class ReviewPayload(BaseModel):
     pkm_required: bool = False
     block_responsible: bool = False
     block_days: int | None = Field(default=None, ge=1, le=365)
+    blocked_participant_ids: list[int] = Field(default_factory=list)
+    blocked_vehicle_ids: list[int] = Field(default_factory=list)
 
 
 def _next_after_conditions(stop: PbStop) -> str:
@@ -366,6 +510,10 @@ class PkmPayload(BaseModel):
     text: str = ""
 
 
+class CoordinatorNotePayload(BaseModel):
+    note: str = ""
+
+
 class EmailRoutePayload(BaseModel):
     block: str = ""
     contractor: str = ""
@@ -382,6 +530,8 @@ def pb_catalog(db: Session = Depends(get_db)):
     ref = _reference_seed()
     return {
         **ref,
+        "work_directions": ref.get("work_directions") or ["ТКРС", "Бурение и ЗБС", "СМР", "ГРП", "Транспорт", "Эксплуатация", "Ремонт", "Прочее"],
+        "stop_sources": ref.get("stop_sources") or ["Работник", "Специалист ПБ", "Руководитель", "БДД", "БКЗ", "Видеоаналитика", "Другое"],
         "contractors": contractors,
         "violations": [_rule_out(rule) for rule in rules],
         "status_labels": STATUS_LABELS,
@@ -451,6 +601,50 @@ def create_stop(
     )
     db.add(stop)
     db.flush()
+
+    extra = PbStopExtra(
+        stop_id=stop.id,
+        work_direction=_clean(payload.get("work_direction"), 180),
+        stop_source=_clean(payload.get("stop_source"), 120) or "Работник",
+        initiator_position=_clean(initiator.get("position"), 240),
+        initiator_block=_clean(initiator.get("block"), 160),
+    )
+    db.add(extra)
+
+    # Responsible person is always represented as a participant for per-person measures/history.
+    if stop.responsible_fio or stop.responsible_pass:
+        db.add(PbStopParticipant(
+            stop_id=stop.id,
+            role="responsible",
+            fio=stop.responsible_fio,
+            position=stop.responsible_position,
+            pass_number=stop.responsible_pass,
+        ))
+    for item in (payload.get("participants") or payload.get("crew") or [])[:30]:
+        fio = _clean((item or {}).get("fio"), 240)
+        pass_number = normalize_pass_number((item or {}).get("pass")) or _clean((item or {}).get("pass"), 60)
+        if not fio and not pass_number:
+            continue
+        db.add(PbStopParticipant(
+            stop_id=stop.id,
+            role="participant",
+            fio=fio,
+            position=_clean((item or {}).get("position"), 240),
+            pass_number=pass_number,
+        ))
+    for item in (payload.get("vehicles") or [])[:20]:
+        number = _clean((item or {}).get("vehicle_number"), 80)
+        pass_number = normalize_pass_number((item or {}).get("pass")) or _clean((item or {}).get("pass"), 60)
+        if not number and not pass_number:
+            continue
+        db.add(PbStopVehicle(
+            stop_id=stop.id,
+            vehicle_number=number,
+            pass_number=pass_number,
+            driver_fio=_clean((item or {}).get("driver_fio"), 240),
+            company=_clean((item or {}).get("company"), 300) or stop.contractor,
+        ))
+
     count = _save_photos(db, stop, photos, "violation")
     if count == 0:
         raise HTTPException(status_code=400, detail="Добавьте хотя бы одно фото нарушения")
@@ -547,7 +741,7 @@ def coordinator_page(request: Request, db: Session = Depends(get_db)):
     response = templates.TemplateResponse(request=request, name="pb_mng_coordinator.html", context={"operator": operator})
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
-    response.headers["X-PB-MNG-Coordinator-Version"] = "20260925-8"
+    response.headers["X-PB-MNG-Coordinator-Version"] = "20260929-9"
     return response
 
 
@@ -674,6 +868,22 @@ def _notify_verified(db: Session, stop: PbStop) -> None:
     stop.mail_status = "sent" if not errors else "partial_error:" + "; ".join(errors)[:500]
 
 
+@router.post("/api/pb-mng/coordinator/stops/{public_id}/note")
+def save_coordinator_note(public_id: str, payload: CoordinatorNotePayload, db: Session = Depends(get_db), operator: Operator = Depends(coordinator_operator)):
+    stop = db.scalar(select(PbStop).where(PbStop.public_id == public_id))
+    if not stop:
+        raise HTTPException(status_code=404, detail="Остановка не найдена")
+    extra = _extra_for_stop(db, stop.id)
+    if not extra:
+        extra = PbStopExtra(stop_id=stop.id)
+        db.add(extra)
+    extra.coordinator_note = _clean(payload.note, 10000)
+    extra.updated_at = utcnow()
+    _audit(db, stop, "coordinator", operator.username, "coordinator_note_saved", {})
+    db.commit()
+    return _stop_out(stop, db, include_actions=True)
+
+
 @router.post("/api/pb-mng/coordinator/stops/{public_id}/review")
 def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(get_db), operator: Operator = Depends(coordinator_operator)):
     stop = db.scalar(select(PbStop).where(PbStop.public_id == public_id))
@@ -725,7 +935,34 @@ def review_stop(public_id: str, payload: ReviewPayload, db: Session = Depends(ge
             ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
             stop.block_until = ends_at
             db.add(PbAccessRestriction(stop_id=stop.id, pass_number=normalize_pass_number(stop.responsible_pass) or stop.responsible_pass, fio=stop.responsible_fio, restriction_kind="personnel", reason=stop.violation_text, ends_at=ends_at, active=True))
-        _audit(db, stop, "coordinator", operator.username, "verified", {"violation_id": rule.id, "severity": severity, "severity_context": severity_context, "measures": _json(stop.measures_json, []), "block": bool(should_block)})
+        participant_rows = {p.id: p for p in _participants_for_stop(db, stop.id)}
+        vehicle_rows = {v.id: v for v in _vehicles_for_stop(db, stop.id)}
+        ends_at = utcnow() + timedelta(days=payload.block_days) if payload.block_days else None
+        for participant_id in payload.blocked_participant_ids:
+            person = participant_rows.get(participant_id)
+            if person and person.pass_number:
+                db.add(PbAccessRestriction(
+                    stop_id=stop.id,
+                    pass_number=normalize_pass_number(person.pass_number) or person.pass_number,
+                    fio=person.fio,
+                    restriction_kind="personnel",
+                    reason=stop.violation_text,
+                    ends_at=ends_at,
+                    active=True,
+                ))
+        for vehicle_id in payload.blocked_vehicle_ids:
+            vehicle = vehicle_rows.get(vehicle_id)
+            if vehicle and vehicle.pass_number:
+                db.add(PbAccessRestriction(
+                    stop_id=stop.id,
+                    pass_number=normalize_pass_number(vehicle.pass_number) or vehicle.pass_number,
+                    fio=vehicle.vehicle_number,
+                    restriction_kind="vehicle",
+                    reason=stop.violation_text,
+                    ends_at=ends_at,
+                    active=True,
+                ))
+                _audit(db, stop, "coordinator", operator.username, "verified", {"violation_id": rule.id, "severity": severity, "severity_context": severity_context, "measures": _json(stop.measures_json, []), "block": bool(should_block)})
         _notify_verified(db, stop)
     else:
         raise HTTPException(status_code=400, detail="Неизвестное решение координатора")
@@ -819,10 +1056,35 @@ def unblock(public_id: str, db: Session = Depends(get_db), operator: Operator = 
             restriction.active = False
             restriction.released_at = utcnow()
             restriction.released_by_id = operator.id
+    extra = _extra_for_stop(db, stop.id)
+    if not extra:
+        extra = PbStopExtra(stop_id=stop.id)
+        db.add(extra)
+    extra.resume_allowed_at = utcnow()
+    extra.updated_at = utcnow()
+    stop.status = "awaiting_resumption"
+    stop.updated_at = utcnow()
+    _audit(db, stop, "coordinator", operator.username, "unblocked_and_resume_allowed", {})
+    db.commit()
+    return _stop_out(stop, db, include_actions=True)
+
+
+@router.post("/api/pb-mng/stops/{public_id}/resume")
+def confirm_resumption(public_id: str, request: Request, db: Session = Depends(get_db)):
+    stop = _find_own_stop(db, public_id, request)
+    if stop.status != "awaiting_resumption":
+        raise HTTPException(status_code=409, detail="Возобновление работ сейчас не ожидается")
+    extra = _extra_for_stop(db, stop.id)
+    if not extra:
+        extra = PbStopExtra(stop_id=stop.id)
+        db.add(extra)
+    extra.resumed_at = utcnow()
+    extra.resumed_by_name = stop.initiator_name
+    extra.updated_at = utcnow()
     stop.status = "closed"
     stop.closed_at = utcnow()
     stop.updated_at = utcnow()
-    _audit(db, stop, "coordinator", operator.username, "unblocked_and_closed", {})
+    _audit(db, stop, "worker", stop.initiator_name, "work_resumed", {})
     db.commit()
     return _stop_out(stop, db, include_actions=True)
 
