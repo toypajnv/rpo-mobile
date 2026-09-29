@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s);let selected=null,catalog=null,reviewViolationId='',reviewSeverity='',activeOnly=false;
-function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function fmt(v){if(!v)return'';return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(v))}function cls(s){if(s==='closed')return'green';if(s==='rejected')return'red';if(['pending_verification','resolution_submitted'].includes(s))return'blue';return'amber'}async function api(url,opts={}){const r=await fetch(url,opts);const d=(r.headers.get('content-type')||'').includes('json')?await r.json():await r.text();if(r.status===401){location.href='/login';throw new Error('Требуется вход')}if(!r.ok)throw new Error(d?.detail||d);return d}
+function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function fmt(v){if(!v)return'';return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(v))}function cls(s){if(s==='closed')return'green';if(s==='rejected')return'red';if(['pending_verification','resolution_submitted'].includes(s))return'blue';if(['awaiting_pkm','awaiting_training'].includes(s))return'purple';if(['ready_for_unblock','awaiting_resumption'].includes(s))return'teal';return'amber'}async function api(url,opts={}){const r=await fetch(url,opts);const d=(r.headers.get('content-type')||'').includes('json')?await r.json():await r.text();if(r.status===401){location.href='/login';throw new Error('Требуется вход')}if(!r.ok)throw new Error(d?.detail||d);return d}
 async function load(){
   const p=new URLSearchParams();
   if($('#statusFilter').value)p.set('status',$('#statusFilter').value);
@@ -10,7 +10,7 @@ async function load(){
   let d={items:[]};
   try{
     d=await api('/api/pb-mng/coordinator/stops?'+p);
-    $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label||'Не классифицировано')}</h3><p>${esc(x.violation.text||x.description||'Остановка работ')}</p><div class="meta"><span>${esc(x.contractor||x.location)}</span><b>${fmt(x.created_at)}</b></div></button>`).join(''):'<div class="empty">Нет карточек</div>';
+    $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label||'Не классифицировано')}</h3><p>${esc(x.violation.text||x.description||'Остановка работ')}</p><div class="meta"><span>${esc(x.contractor||x.location)}${x.history?.repeat?' · ПОВТОРНО':''}</span><b>${fmt(x.created_at)}</b></div><div class="queue-submeta">${esc([x.work_direction,x.stop_source].filter(Boolean).join(' · '))}</div></button>`).join(''):'<div class="empty">Нет карточек</div>';
     document.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openStop(b.dataset.id));
     const visibleIds=new Set((d.items||[]).map(x=>x.id));
     if(selected&&!visibleIds.has(selected.id)){selected=null;$('#detail').innerHTML='<div class="empty">Выберите остановку слева</div>';}
@@ -34,6 +34,7 @@ async function load(){
       stPkm:'awaiting_pkm',
       stTraining:'awaiting_training',
       stUnblock:'ready_for_unblock',
+      stResumption:'awaiting_resumption',
       stClosed:'closed',
       stRejected:'rejected'
     };
@@ -67,6 +68,7 @@ const STATUS_CAPTIONS={
   awaiting_pkm:'Ожидается / проверяется ПКМ',
   awaiting_training:'Ожидается обучение',
   ready_for_unblock:'Готово к разблокировке',
+  awaiting_resumption:'Разрешено возобновление',
   closed:'Закрытые остановки',
   rejected:'Отклонённые остановки'
 };
@@ -177,8 +179,9 @@ function nextAction(status){
     resolution_revision:['Р','Ожидаем повторное устранение','Координатор вернул подтверждение устранения на доработку.','worker'],
     awaiting_pkm:['К','Проверка ПКМ','Проверьте план корректирующих мероприятий.',''],
     awaiting_training:['К','Контроль обучения','После прохождения назначенного курса отметьте его выполнение.',''],
-    ready_for_unblock:['К','Разблокировка','Все условия выполнены. Проверьте и снимите ограничение пропуска.',''],
-    closed:['✓','Процесс завершён','Остановка закрыта, все условия выполнены.','done'],
+    ready_for_unblock:['К','Разблокировка','Все условия выполнены. Снимите ограничения и разрешите возобновление работ.',''],
+    awaiting_resumption:['Р','Ожидаем факт возобновления','Работнику разрешено возобновить работу. Ожидается подтверждение фактического старта.','worker'],
+    closed:['✓','Процесс завершён','Работы фактически возобновлены, карточка закрыта.','done'],
     rejected:['×','Остановка отклонена','Карточка завершена решением координатора.','done']
   };
   return map[status]||['•','Текущий этап','Проверьте состояние карточки.',''];
