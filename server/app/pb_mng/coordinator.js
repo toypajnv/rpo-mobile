@@ -204,8 +204,10 @@ function historyHtml(x){
   return \`<section class="history-card \${h.repeat?'':'clean'}"><h4>\${h.repeat?'Повторность / история':'История по участникам'}</h4>\${rows||'<div class="history-person">По участникам прошлых остановок не найдено</div>'}<div class="history-person"><b>\${esc(contractor.name||'Подрядчик')}</b> · предыдущих записей: <b>\${contractor.total_previous||0}</b></div></section>\`;
 }
 function recipientsHtml(x){
-  const rows=x.recipient_routes||[];
-  return \`<section class="recipient-card"><h4>Маршрутизация уведомления</h4>\${rows.length?rows.map(r=>\`<div class="recipient-row"><b>\${esc(r.role||'Получатель')}</b><span>\${esc(r.name||'')} \${r.email?'· '+esc(r.email):''}</span></div>\`).join(''):'<div class="history-person">Адресаты по подрядчику/блоку пока не настроены. Используется общий адрес остановок.</div>'}</section>\`;
+  const rows=x.recipient_routes||[],contract=x.contract_card||null;
+  const contractRows=contract?\`<div class="recipient-row"><b>Договор</b><span>\${esc(contract.contract_number||'—')}</span></div><div class="recipient-row"><b>Владелец</b><span>\${esc(contract.contract_owner||'—')}</span></div><div class="recipient-row"><b>ЕОЛ</b><span>\${esc(contract.eol||'—')}</span></div><div class="recipient-row"><b>КИ / HSE</b><span>\${esc([contract.contract_engineer,contract.hse].filter(Boolean).join(' · ')||'—')}</span></div><div class="recipient-row"><b>Риск</b><span>\${esc([contract.risk_level,contract.criticality].filter(Boolean).join(' · ')||'—')}</span></div>\`:'<div class="history-person">Карточка договора появится после обновления справочника договоров.</div>';
+  const routeRows=rows.length?rows.map(r=>\`<div class="recipient-row"><b>\${esc(r.role||'Получатель')}</b><span>\${esc(r.name||'')} \${r.email?'· '+esc(r.email):''}</span></div>\`).join(''):'<div class="history-person">Дополнительные email-адресаты не настроены. Используется общий адрес остановок.</div>';
+  return \`<section class="recipient-card"><h4>Договор и адресаты</h4>\${contractRows}<div style="height:1px;background:#e7ebf0;margin:8px 0"></div>\${routeRows}</section>\`;
 }
 function coordinatorNoteHtml(x){
   return \`<section class="coordinator-note-box"><h4>Внутренняя заметка координатора</h4><textarea id="coordinatorNote" placeholder="Не отправляется работнику и используется для внутренней работы">\${esc(x.coordinator_note||'')}</textarea><div class="coordinator-note-actions"><button class="btn light" id="saveCoordinatorNote" type="button">Сохранить заметку</button></div></section>\`;
