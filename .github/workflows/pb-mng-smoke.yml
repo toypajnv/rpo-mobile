@@ -25,7 +25,7 @@ jobs:
             openapi="$(curl -fsS --max-time 10 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
             coordinator_js="$(curl -fsS --max-time 10 https://rpo-mng.ru/pb-mng/coordinator.js 2>/dev/null || true)"
             if [[ "$page" == *'РПО и полный цикл остановки'* ]] \
-              && [[ "$sw" == *'pb-mng-v1-20260929-9'* ]] \
+              && [[ "$sw" == *'pb-mng-v1-20260930-10'* ]] \
               && [[ "$catalog" == *'"violations"'* ]] \
               && [[ "$catalog" == *'"minor_reclassify_minutes":60'* ]] \
               && [[ "$openapi" == *'"/api/pb-mng/stops"'* ]] \
