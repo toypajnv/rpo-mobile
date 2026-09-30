@@ -39,8 +39,8 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           src = Path('server/app/templates/pb_mng_coordinator.html').read_text(encoding='utf-8')
-          assert '/pb-mng/coordinator.js?v=20260929-9' in src
-          assert 'Версия координатора 20260929-9' in src
+          assert '/pb-mng/coordinator.js?v=20260930-10' in src
+          assert 'Версия координатора 20260930-10' in src
           assert '<script>' not in src
           js = Path('server/app/pb_mng/coordinator.js').read_text(encoding='utf-8')
           assert 'startCoordinator()' in js
@@ -59,6 +59,18 @@ jobs:
           assert 'peopleAndVehiclesHtml' in js
           assert 'saveCoordinatorNote' in js
           assert 'blocked_vehicle_ids' in js
+          assert 'workflow-groups' in src
+          assert 'group-blue' in src
+          assert 'group-amber' in src
+          assert 'group-purple' in src
+          assert 'group-green' in src
+          assert 'group-red' in src
+          mobile = Path('server/app/pb_mng/index.html').read_text(encoding='utf-8')
+          assert 'section-context' in mobile
+          assert 'section-incident' in mobile
+          assert 'section-people' in mobile
+          assert 'section-vehicle' in mobile
+          assert 'section-evidence' in mobile
           print('External coordinator runtime contract OK')
           PY
       - name: Run PB_MNG workflow test
