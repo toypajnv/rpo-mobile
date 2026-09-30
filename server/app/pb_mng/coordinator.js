@@ -10,7 +10,7 @@ async function load(){
   let d={items:[]};
   try{
     d=await api('/api/pb-mng/coordinator/stops?'+p);
-    $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label||'Не классифицировано')}</h3><p>${esc(x.violation.text||x.description||'Остановка работ')}</p><div class="meta"><span>${esc(x.contractor||x.location)}${x.history?.repeat?' · ПОВТОРНО':''}</span><b>${fmt(x.created_at)}</b></div><div class="queue-submeta">${esc([x.work_direction,x.stop_source].filter(Boolean).join(' · '))}</div></button>`).join(''):'<div class="empty">Нет карточек</div>';
+    $('#queue').innerHTML=d.items.length?d.items.map(x=>`<button class="queue-item ${selected?.id===x.id?'active':''}" data-id="${x.id}" data-status="${esc(x.status)}"><span class="status ${cls(x.status)}">${esc(x.status_label)}</span><h3>${x.id} · ${esc(x.severity_label||'Не классифицировано')}</h3><p>${esc(x.violation.text||x.description||'Остановка работ')}</p><div class="meta"><span>${esc(x.contractor||x.location)}${x.history?.repeat?' · ПОВТОРНО':''}</span><b>${fmt(x.created_at)}</b></div><div class="queue-submeta">${esc([x.work_direction,x.stop_source].filter(Boolean).join(' · '))}</div></button>`).join(''):'<div class="empty">Нет карточек</div>';
     document.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openStop(b.dataset.id));
     const visibleIds=new Set((d.items||[]).map(x=>x.id));
     if(selected&&!visibleIds.has(selected.id)){selected=null;$('#detail').innerHTML='<div class="empty">Выберите остановку слева</div>';}
