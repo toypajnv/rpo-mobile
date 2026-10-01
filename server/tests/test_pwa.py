@@ -38,6 +38,8 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('Работы можно проводить', js)
         self.assertIn('ЦДПН-1', js)
         self.assertIn('Замена исполнителей работ', js)
+        self.assertIn("{id:'NOT_PERFORMED',title:'РПО не проводились'", js)
+        self.assertIn("['RN','РПО не проводились']", js)
         self.assertIn('Следующее действие', ux)
         self.assertIn('history-search', ux)
         self.assertIn('/pwa-assets/sync-status.js?v=20260831-1', html)
@@ -154,7 +156,7 @@ class PwaStaticTests(unittest.TestCase):
             self.assertFalse(data['update_required'])
             self.assertEqual(data['pwa_version'], '1.3.1')
             self.assertEqual(data['pwa_url'], 'https://rpo-mng.ru/app/')
-            self.assertEqual(data['server_version'], '0.8.0')
+            self.assertEqual(data['server_version'], '0.8.1')
 
 
 if __name__ == '__main__':
