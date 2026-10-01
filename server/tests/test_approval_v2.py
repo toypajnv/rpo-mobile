@@ -11,8 +11,9 @@ from app.main import (
     operator_analytics,
     operator_events,
     operator_transmissions,
+    normalize_no_approval_stages,
 )
-from app.models import Operator
+from app.models import MobileEvent, Operator, PermitRecord
 from app.schemas import EventCreate, STRUCTURAL_UNITS
 
 
@@ -60,6 +61,51 @@ class ApprovalV2Tests(unittest.TestCase):
             event = create_mobile_event(self._payload(key="AZ", permit="20001"), db)
             self.assertFalse(event.approval_required)
             self.assertEqual(event.approval_status, "not_required")
+
+    def test_finish_and_not_performed_are_information_only(self) -> None:
+        with SessionLocal() as db:
+            finish = create_mobile_event(self._payload(key="BC", permit="20004"), db)
+            not_performed = create_mobile_event(self._payload(key="RN", permit="20005"), db)
+
+            self.assertFalse(finish.approval_required)
+            self.assertEqual(finish.approval_status, "not_required")
+            self.assertFalse(not_performed.approval_required)
+            self.assertEqual(not_performed.approval_status, "not_required")
+
+            finish_snapshot = mobile_permit_lookup("20004", db)
+            not_performed_snapshot = mobile_permit_lookup("20005", db)
+            self.assertEqual(finish_snapshot["approval"]["status"], "none")
+            self.assertEqual(not_performed_snapshot["approval"]["status"], "none")
+            self.assertEqual(not_performed_snapshot["fields"]["RN"]["approval_status"], "not_required")
+
+    def test_existing_finish_pending_is_normalized_after_deploy(self) -> None:
+        with SessionLocal() as db:
+            finish = create_mobile_event(self._payload(key="BC", permit="20006"), db)
+            finish.approval_required = True
+            finish.approval_status = "pending"
+            record = db.scalar(
+                __import__("sqlalchemy").select(PermitRecord).where(PermitRecord.permit_number == "20006")
+            )
+            data = __import__("json").loads(record.data_json)
+            data["BC"]["approval_required"] = True
+            data["BC"]["approval_status"] = "pending"
+            record.data_json = __import__("json").dumps(data, ensure_ascii=False)
+            db.commit()
+
+        normalize_no_approval_stages()
+
+        with SessionLocal() as db:
+            finish = db.scalar(
+                __import__("sqlalchemy").select(MobileEvent).where(MobileEvent.permit_number == "20006")
+            )
+            record = db.scalar(
+                __import__("sqlalchemy").select(PermitRecord).where(PermitRecord.permit_number == "20006")
+            )
+            data = __import__("json").loads(record.data_json)
+            self.assertFalse(finish.approval_required)
+            self.assertEqual(finish.approval_status, "not_required")
+            self.assertFalse(data["BC"]["approval_required"])
+            self.assertEqual(data["BC"]["approval_status"], "not_required")
 
     def test_structural_units_are_exact_and_filters_work(self) -> None:
         self.assertEqual(STRUCTURAL_UNITS, (
