@@ -14,7 +14,7 @@ class AndroidPermitEntryHotfixTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         gradle = (root / "android/app/build.gradle.kts").read_text(encoding="utf-8")
         self.assertIn('versionCode = 16', gradle)
-        self.assertIn('versionName = "2.3.0"', gradle)
+        self.assertIn('versionName = "2.3.1"', gradle)
 
 
 if __name__ == "__main__":
