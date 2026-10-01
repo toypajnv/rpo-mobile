@@ -13,4 +13,5 @@ STAGES = {
     "BF": {"label": "Выполнение мероприятий по передаче объекта", "order": 100, "kind": "datetime", "after": "BD"},
     "BG": {"label": "Закрытие ЭНД", "order": 105, "kind": "text"},
     "BH": {"label": "Передача площадки эксплуатирующей организации", "order": 110, "kind": "datetime", "after": "BF"},
+    "RN": {"label": "РПО не проводились", "order": 120, "kind": "datetime", "optional": True},
 }
