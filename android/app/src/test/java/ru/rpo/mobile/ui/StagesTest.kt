@@ -44,7 +44,17 @@ class StagesTest {
             listOfNotNull(stage.first.key, stage.second?.key, stage.third?.key)
         }
         assertEquals(keys.size, keys.toSet().size)
-        assertTrue(keys.containsAll(listOf("AT", "AU", "AV", "AY", "BC", "AZ", "BA", "BE", "RI")))
+        assertTrue(keys.containsAll(listOf("AT", "AU", "AV", "AY", "BC", "AZ", "BA", "BE", "RI", "RN")))
+    }
+
+    @Test
+    fun notPerformedIsTheFinalOptionalStage() {
+        val stage = stages.last()
+        assertEquals("NOT_PERFORMED", stage.id)
+        assertEquals("RN", stage.first.key)
+        assertEquals(StageKind.DATETIME, stage.kind)
+        assertTrue(stage.optional)
+        assertFalse(stage in requiredStages)
     }
 
     @Test
