@@ -40,6 +40,8 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn('Замена исполнителей работ', js)
         self.assertIn("{id:'NOT_PERFORMED',title:'РПО не проводились'", js)
         self.assertIn("['RN','РПО не проводились']", js)
+        self.assertIn("{id:'NOT_PERFORMED',title:'РПО не проводились'", ux)
+        self.assertIn("case 'NOT_PERFORMED': return 'Передать: РПО не проводились'", ux)
         self.assertIn('Следующее действие', ux)
         self.assertIn('history-search', ux)
         self.assertIn('/pwa-assets/sync-status.js?v=20260831-1', html)
@@ -72,8 +74,8 @@ class PwaStaticTests(unittest.TestCase):
         self.assertIn("note.dataset.message = text", ux)
         self.assertNotIn('ux-next-open', ux)
         self.assertIn('Переходить между этапами можно сразу', html)
-        self.assertIn('/pwa-assets/ux.js?v=20260830-2', html)
-        self.assertIn('/pwa-assets/ux.js?v=20260830-2', sw)
+        self.assertIn('/pwa-assets/ux.js?v=20261001-1', html)
+        self.assertIn('/pwa-assets/ux.js?v=20261001-1', sw)
 
     def test_transmission_status_requires_server_confirmation_and_explains_failures(self) -> None:
         html = (self.pwa_dir / "index.html").read_text(encoding="utf-8")
