@@ -184,7 +184,12 @@ def normalize_no_approval_stages() -> None:
                 field = data.get(key)
                 if not isinstance(field, dict):
                     continue
-                if bool(field.get("approval_required")) or str(field.get("approval_status", "")) != "not_required":
+                if (
+                    bool(field.get("approval_required"))
+                    or str(field.get("approval_status", "")) != "not_required"
+                    or bool(field.get("approved_at"))
+                    or field.get("approved_by_id") is not None
+                ):
                     record_changed = True
                 field["approval_required"] = False
                 field["approval_status"] = "not_required"
