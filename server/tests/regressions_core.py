@@ -188,7 +188,10 @@ class PermitRegressionTests(unittest.TestCase):
                 xlsx_path, json_path = build_export(self._records(), str(export_dir), batch_id=77)
 
                 ws = load_workbook(xlsx_path, read_only=True).active
-                self.assertEqual(ws.max_row, 3)
+                self.assertEqual(ws.max_row, 501)
+                self.assertEqual(ws["C2"].value, "34567")
+                self.assertEqual(ws["C3"].value, "98765")
+                self.assertIsNone(ws["C4"].value)
                 payload = json.loads(json_path.read_text(encoding="utf-8"))
                 self.assertEqual(len(payload["permits"]), 2)
 
