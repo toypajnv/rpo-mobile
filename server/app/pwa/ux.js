@@ -9,6 +9,7 @@
     {id:'RESUME_WORK',title:'Возобновление работ',kind:'resume',optional:false},
     {id:'EXTEND_WORK',title:'Продление РПО',kind:'extension',optional:false},
     {id:'REPLACEMENTS',title:'Замена исполнителей работ',kind:'replacements',optional:true},
+    {id:'NOT_PERFORMED',title:'РПО не проводились',kind:'datetime',optional:true},
   ];
 
   const $ = id => document.getElementById(id);
@@ -79,6 +80,7 @@
       case 'RESUME_WORK': return 'Передать возобновление работ';
       case 'EXTEND_WORK': return 'Передать продление РПО';
       case 'REPLACEMENTS': return 'Передать замену исполнителей';
+      case 'NOT_PERFORMED': return 'Передать: РПО не проводились';
       default: return 'Передать данные этапа';
     }
   }
