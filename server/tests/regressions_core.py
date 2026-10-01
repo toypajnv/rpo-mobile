@@ -166,7 +166,7 @@ class PermitRegressionTests(unittest.TestCase):
         self.assertEqual(len(preview["records"]), 1)
         self.assertEqual(preview["records"][0]["permit_number"], "34567")
         self.assertTrue(preview["records"][0]["previously_exported"])
-        self.assertEqual(preview["stage_keys"], ["AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC", "RI"])
+        self.assertEqual(preview["stage_keys"], ["AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC", "RI", "RN"])
 
         send_source = inspect.getsource(send_export_confirmed)
         self.assertNotIn("PermitRecord.exported_at.is_(None)", send_source)
