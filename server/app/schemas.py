@@ -4,7 +4,7 @@ import re
 
 
 # Legacy fields stay accepted permanently so already installed APKs keep working.
-ALLOWED_FIELDS = {"AT", "AU", "AV", "AX", "AY", "AZ", "BA", "BC", "BD", "BE", "BF", "BG", "BH", "RI"}
+ALLOWED_FIELDS = {"AT", "AU", "AV", "AX", "AY", "AZ", "BA", "BC", "BD", "BE", "BF", "BG", "BH", "RI", "RN"}
 STRUCTURAL_UNITS = (
     "ЦДПН-1", "ЦДПН-2", "ЦДПН-3", "ЦДПН-4",
     "ЦППН-1", "ЦППН-2", "ЦСДиТГ", "ЦСиР", "ЦТОиРТ-1", "ЦТОиРТ-2",
