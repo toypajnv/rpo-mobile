@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const PWA_VERSION = '1.3.0';
+  const PWA_VERSION = '1.3.1';
   const ANDROID_API_VERSION = '2.0.1';
   const UNITS = ['ЦДПН-1','ЦДПН-2','ЦДПН-3','ЦДПН-4','ЦППН-1','ЦППН-2','ЦСДиТГ','ЦСиР','ЦТОиРТ-1','ЦТОиРТ-2'];
   const STAGES = [
@@ -12,6 +12,7 @@
     {id:'RESUME_WORK',title:'Возобновление работ',kind:'resume',events:[['BA','Возобновление работ']]},
     {id:'EXTEND_WORK',title:'Продление РПО',kind:'extension',events:[['BE','Продление РПО']]},
     {id:'REPLACEMENTS',title:'Замена исполнителей работ',kind:'replacements',events:[['RI','Замена исполнителей работ']],optional:true},
+    {id:'NOT_PERFORMED',title:'РПО не проводились',kind:'datetime',events:[['RN','РПО не проводились']],optional:true},
   ];
   const REQUIRED_STAGE_IDS = STAGES.filter(s => !s.optional).map(s => s.id);
   const STORAGE = {
@@ -288,7 +289,7 @@
   function enqueue(events){const q=queue();events.forEach(payload=>q.push({id:payload.client_event_id,payload,status:'pending',error:'',createdAt:new Date().toISOString()}));saveQueue(q);}
   function queueCounts(){const q=queue();return {pending:q.filter(x=>x.status==='pending').length,failed:q.filter(x=>x.status==='failed').length};}
   function renderQueueNotice(){const c=queueCounts(),box=$('queue-notice');if(!c.pending&&!c.failed){box.hidden=true;return;}box.hidden=false;$('queue-title').textContent=c.failed?'Есть записи, требующие проверки':'Данные ожидают отправки';$('queue-text').textContent=`В очереди: ${c.pending}. Ошибок: ${c.failed}. Данные сохранены на этом iPhone.`;}
-  async function syncQueue(showMessage=false){if(!navigator.onLine){renderQueueNotice();if(showMessage)showFlash(true,'Нет сети','Данные сохранены на устройстве и будут отправлены автоматически.');return;}let q=queue(),sent=0,failed=0;for(const item of q.filter(x=>x.status==='pending')){try{const r=await fetch('/api/mobile/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.payload)});if(r.ok){item.status='sent';sent++;}else if(r.status===422||r.status===400){const body=await r.json().catch(()=>({}));item.status='failed';item.error=typeof body.detail==='string'?body.detail:'Сервер отклонил данные';failed++;}else{break;}}catch(_){break;}}q=q.filter(x=>x.status!=='sent');saveQueue(q);if(showMessage){if(failed)showFlash(false,'Проверьте данные',`${failed} записей сервер отклонил. Исправьте данные и нажмите «Повторить».`);else if(sent)showFlash(true,'Передано на сервер','Дождитесь статуса «Работы можно проводить».');else if(q.some(x=>x.status==='pending'))showFlash(true,'Сохранено локально','Отправка повторится автоматически.');}if(sent){await lookupPermit(true);await loadHistory();}}
+  async function syncQueue(showMessage=false){if(!navigator.onLine){renderQueueNotice();if(showMessage)showFlash(true,'Нет сети','Данные сохранены на устройстве и будут отправлены автоматически.');return;}let q=queue(),sent=0,failed=0,sentApprovalNeeded=false;const noApprovalKeys=new Set(['AZ','BC','RN']);for(const item of q.filter(x=>x.status==='pending')){try{const r=await fetch('/api/mobile/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.payload)});if(r.ok){item.status='sent';sent++;if(!noApprovalKeys.has(String(item.payload?.field_key||'').toUpperCase()))sentApprovalNeeded=true;}else if(r.status===422||r.status===400){const body=await r.json().catch(()=>({}));item.status='failed';item.error=typeof body.detail==='string'?body.detail:'Сервер отклонил данные';failed++;}else{break;}}catch(_){break;}}q=q.filter(x=>x.status!=='sent');saveQueue(q);if(showMessage){if(failed)showFlash(false,'Проверьте данные',`${failed} записей сервер отклонил. Исправьте данные и нажмите «Повторить».`);else if(sent)showFlash(true,'Передано на сервер',sentApprovalNeeded?'Дождитесь статуса «Работы можно проводить».':'Согласование оператора для этого этапа не требуется.');else if(q.some(x=>x.status==='pending'))showFlash(true,'Сохранено локально','Отправка повторится автоматически.');}if(sent){await lookupPermit(true);await loadHistory();}}
   function retryFailed(){const q=queue();q.forEach(x=>{if(x.status==='failed'){x.status='pending';x.error='';}});saveQueue(q);syncQueue(true);}
 
   function showFlash(success,title,text){const box=$('flash');box.hidden=false;box.className=`notice ${success?'info-notice':'queue-notice'}`;$('flash-icon').textContent=success?'✓':'!';$('flash-title').textContent=title;$('flash-text').textContent=text;clearTimeout(showFlash.timer);showFlash.timer=setTimeout(()=>{box.hidden=true;},5500);}

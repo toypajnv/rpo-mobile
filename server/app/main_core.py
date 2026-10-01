@@ -30,7 +30,8 @@ from .pwa_assets import make_icon_png
 BASE_DIR = Path(__file__).resolve().parent
 PWA_DIR = BASE_DIR / "pwa"
 REQUIRED_DASHBOARD_STAGE_KEYS = ("AT", "AU", "AV", "AY", "AZ", "BA", "BE", "BC")
-DASHBOARD_STAGE_KEYS = REQUIRED_DASHBOARD_STAGE_KEYS + ("RI",)
+DASHBOARD_STAGE_KEYS = REQUIRED_DASHBOARD_STAGE_KEYS + ("RI", "RN")
+NO_APPROVAL_STAGE_KEYS = frozenset({"AZ", "BC", "RN"})
 LATEST_MOBILE_VERSION = "2.0.1"
 MIN_SUPPORTED_MOBILE_VERSION = "1.0.1"
 MOBILE_APK_URL = "https://github.com/toypajnv/rpo-mobile/releases/download/v2.0.1-test/rpo-mobile-2.0.1.apk"
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
     ensure_admin()
     ensure_default_operator()
     ensure_permit_records()
+    normalize_no_approval_stages()
     yield
 
 
@@ -152,6 +154,59 @@ def ensure_permit_records() -> None:
         db.commit()
 
 
+def normalize_no_approval_stages() -> None:
+    """Make informational stages non-actionable, including rows created before this policy."""
+    with SessionLocal() as db:
+        changed = False
+        events = list(
+            db.scalars(
+                select(MobileEvent).where(MobileEvent.field_key.in_(NO_APPROVAL_STAGE_KEYS))
+            )
+        )
+        for event in events:
+            if (
+                event.approval_required
+                or event.approval_status != "not_required"
+                or event.approved_at is not None
+                or event.approved_by_id is not None
+            ):
+                event.approval_required = False
+                event.approval_status = "not_required"
+                event.approved_at = None
+                event.approved_by_id = None
+                changed = True
+
+        records = list(db.scalars(select(PermitRecord)))
+        for record in records:
+            data = _safe_data(record.data_json)
+            record_changed = False
+            for key in NO_APPROVAL_STAGE_KEYS:
+                field = data.get(key)
+                if not isinstance(field, dict):
+                    continue
+                if (
+                    bool(field.get("approval_required"))
+                    or str(field.get("approval_status", "")) != "not_required"
+                    or bool(field.get("approved_at"))
+                    or field.get("approved_by_id") is not None
+                ):
+                    record_changed = True
+                field["approval_required"] = False
+                field["approval_status"] = "not_required"
+                field["approved_at"] = ""
+                field["approved_by_id"] = None
+                for stale_key in ("denied_reason", "decision_by", "decision_at"):
+                    if stale_key in field:
+                        field.pop(stale_key, None)
+                        record_changed = True
+            if record_changed:
+                record.data_json = json.dumps(data, ensure_ascii=False)
+                changed = True
+
+        if changed:
+            db.commit()
+
+
 def _parse_period(period_from: str, period_to: str) -> tuple[datetime, datetime]:
     try:
         start = datetime.fromisoformat(period_from.replace("Z", "+00:00"))
@@ -202,7 +257,7 @@ def _has_stage(data: dict, key: str) -> bool:
 def _approval_summary_from_data(data: dict) -> dict:
     required = []
     for key in _dashboard_stage_keys():
-        if key == "AZ":
+        if key in NO_APPROVAL_STAGE_KEYS:
             continue
         field = data.get(key) or {}
         if field and bool(field.get("approval_required")):
@@ -273,6 +328,8 @@ def _apply_event_filters(stmt, q: str = "", unit: str = ""):
 
 def _record_state(record: PermitRecord) -> tuple[str, str]:
     data = record_data(record)
+    if _has_stage(data, "RN"):
+        return "Не проводилось", "not_performed"
     if _has_stage(data, "BC"):
         return "Завершено", "done"
     stop_at = _field_dt(data, "AZ")
@@ -588,6 +645,7 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
     except EventValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    approval_required = payload.field_key not in NO_APPROVAL_STAGE_KEYS
     event = MobileEvent(
         client_event_id=client_event_id,
         device_id=payload.device_id,
@@ -599,8 +657,8 @@ def create_mobile_event(payload: EventCreate, db: Session = Depends(get_db)):
         event_time=dt_utc(payload.event_time),
         field_value=payload.field_value,
         comment=payload.comment,
-        approval_required=payload.field_key != "AZ",
-        approval_status="pending" if payload.field_key != "AZ" else "not_required",
+        approval_required=approval_required,
+        approval_status="pending" if approval_required else "not_required",
     )
     db.add(event)
     try:
@@ -907,12 +965,12 @@ def approve_mobile_event(
     event = db.get(MobileEvent, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Передача не найдена")
-    if not event.approval_required or event.field_key == "AZ":
+    if not event.approval_required or event.field_key in NO_APPROVAL_STAGE_KEYS:
         return {
             "status": "not_required",
             "event_id": event.id,
             "permit_number": event.permit_number,
-            "message": "Для остановки работ разрешение оператора не требуется",
+            "message": "Для этого этапа решение оператора не требуется",
         }
     if event.approval_status == "approved":
         return {

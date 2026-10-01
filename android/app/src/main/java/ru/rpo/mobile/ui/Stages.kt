@@ -60,6 +60,13 @@ val stages = listOf(
         first = StageEvent("RI", "Замена исполнителей работ"),
         optional = true,
     ),
+    Stage(
+        id = "NOT_PERFORMED",
+        title = "РПО не проводились",
+        kind = StageKind.DATETIME,
+        first = StageEvent("RN", "РПО не проводились"),
+        optional = true,
+    ),
 )
 
 val requiredStages: List<Stage> = stages.filterNot { it.optional }

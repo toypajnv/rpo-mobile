@@ -23,7 +23,7 @@ def _decision_summary(core, data: dict) -> dict:
     base = core._decision_control_original_summary(data)
     denied: list[tuple[str, dict]] = []
     for key in core._dashboard_stage_keys():
-        if key == "AZ":
+        if key in core.NO_APPROVAL_STAGE_KEYS:
             continue
         field = data.get(key) or {}
         if not field or not bool(field.get("approval_required")):
@@ -149,7 +149,7 @@ def install_decision_control(core) -> None:
         event = db.get(MobileEvent, event_id)
         if not event:
             raise HTTPException(status_code=404, detail="Этап не найден")
-        if not event.approval_required or event.field_key == "AZ":
+        if not event.approval_required or event.field_key in core.NO_APPROVAL_STAGE_KEYS:
             raise HTTPException(status_code=400, detail="Для этого этапа решение оператора не требуется")
 
         record = db.scalar(select(PermitRecord).where(PermitRecord.permit_number == event.permit_number))

@@ -10,11 +10,11 @@ APP_DIR = SERVER_DIR / "app"
 
 class Ux21AssetsTest(unittest.TestCase):
     def test_public_versions_are_updated_without_breaking_legacy_support(self):
-        self.assertEqual(main.app.version, "0.8.0")
-        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.3.0")
-        self.assertEqual(main.PWA_VERSION, "1.3.0")
+        self.assertEqual(main.app.version, "0.8.1")
+        self.assertEqual(main.LATEST_MOBILE_VERSION, "2.3.1")
+        self.assertEqual(main.PWA_VERSION, "1.3.1")
         self.assertEqual(main.MIN_SUPPORTED_MOBILE_VERSION, "1.0.1")
-        self.assertIn("v2.3.0-test/rpo-mobile-2.3.0.apk", main.MOBILE_APK_URL)
+        self.assertIn("v2.3.1-test/rpo-mobile-2.3.1.apk", main.MOBILE_APK_URL)
 
     def test_dashboard_core_is_preserved_and_operator_decisions_are_layered(self):
         loader = (APP_DIR / "static" / "dashboard.js").read_text(encoding="utf-8")
@@ -44,12 +44,12 @@ class Ux21AssetsTest(unittest.TestCase):
         sync = (APP_DIR / "pwa" / "sync-status.js").read_text(encoding="utf-8")
         deny = (APP_DIR / "pwa" / "deny-lock.js").read_text(encoding="utf-8")
         history_status = (APP_DIR / "pwa" / "history-status.js").read_text(encoding="utf-8")
-        self.assertIn("PWA 1.3.0", index)
+        self.assertIn("PWA 1.3.1", index)
         self.assertIn("/pwa-assets/ux.js?v=20260830-2", index)
         self.assertIn("/pwa-assets/sync-status.js?v=20260831-1", index)
         self.assertIn("/pwa-assets/deny-lock.js?v=20260831-1", index)
         self.assertIn('"start_url": "/app/?home=20260915"', manifest)
-        self.assertIn("rpo-pwa-shell-v1.3.0-r2", sw)
+        self.assertIn("rpo-pwa-shell-v1.3.1-r1", sw)
         self.assertIn("/app/?home=20260915", sw)
         self.assertIn("fetch(req,{cache:'no-store'})", sw)
         self.assertIn("return offlineShell();", sw)

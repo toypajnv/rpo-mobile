@@ -527,7 +527,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             val message = when {
                 result.failed > 0 -> "Часть данных сохранена локально, но ${result.failed} записей сервер отклонил. Их можно повторить после проверки."
                 result.pending > 0 -> "Данные сохранены. ${result.pending} записей остаются в очереди и будут отправлены автоматически."
-                result.sent > 0 -> "Данные переданы на сервер. Для этапов, кроме остановки, дождитесь статуса «Работы можно проводить»."
+                result.sent > 0 -> "Данные переданы на сервер. Для этапов, требующих согласования, дождитесь статуса «Работы можно проводить»."
                 else -> "Очередь синхронизирована."
             }
             _state.value = _state.value.copy(message = message, success = result.failed == 0, sending = false)
