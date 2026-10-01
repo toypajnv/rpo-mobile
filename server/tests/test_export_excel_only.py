@@ -40,9 +40,11 @@ class ExportExcelOnlyTests(unittest.TestCase):
             xlsx_path, _json_path = build_export([record], tmp, batch_id=91)
             ws = load_workbook(xlsx_path, read_only=True).active
             headers = [cell.value for cell in ws[1]]
-            self.assertIn("BE — Продление работ на", headers)
-            extension_col = headers.index("BE — Продление работ на") + 1
-            self.assertEqual(ws.cell(row=2, column=extension_col).value, "16.08.2026")
+            self.assertEqual(headers[1], "Продлён до (дата)")
+            self.assertEqual(headers[2], "Номер наряда-допуска")
+            self.assertEqual(ws["B2"].value.strftime("%d.%m.%Y"), "16.08.2026")
+            self.assertEqual(ws["B2"].number_format, "dd.mm.yyyy")
+            self.assertEqual(ws["C2"].value, "34567")
 
     def test_email_export_forwards_only_xlsx_attachment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
