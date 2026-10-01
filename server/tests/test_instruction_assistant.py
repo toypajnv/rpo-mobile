@@ -24,7 +24,7 @@ class InstructionAssistantTests(unittest.TestCase):
         self.assertIn("Обсудите действия в нештатной ситуации", assistant)
         self.assertIn("Определите готовность приступить к безопасному выполнению работ", assistant)
         self.assertIn("Мини-база знаний", assistant)
-        self.assertIn('versionName = "2.3.0"', gradle)
+        self.assertIn('versionName = "2.3.1"', gradle)
 
     def test_ios_pwa_has_instruction_tab_assets_and_offline_cache(self) -> None:
         index = (self.pwa / "index.html").read_text(encoding="utf-8")
@@ -41,10 +41,10 @@ class InstructionAssistantTests(unittest.TestCase):
         self.assertIn("Когда нужен повторный инструктаж", script)
         self.assertIn("Пять шагов безопасности / РОИ", script)
         self.assertIn("instruction-risk-grid", css)
-        self.assertIn("rpo-pwa-shell-v1.3.0", sw)
+        self.assertIn("rpo-pwa-shell-v1.3.1", sw)
         self.assertIn("instruction-assistant.js?v=20260906-1", sw)
         self.assertIn("instruction-assistant.css?v=20260906-1", sw)
-        self.assertIn("const PWA_VERSION = '1.3.0'", app_js)
+        self.assertIn("const PWA_VERSION = '1.3.1'", app_js)
 
 
 if __name__ == "__main__":
