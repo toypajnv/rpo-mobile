@@ -170,7 +170,7 @@ jobs:
           grep -F 'PHONE_SHORT_SIDE_MAX = 540' /tmp/dashboard-mobile.js
           grep -F "'(pointer: coarse)'" /tmp/dashboard-mobile.js
           grep -F 'mobile-dashboard-header' /tmp/dashboard-mobile.js
-          grep -F 'data-mobile-label' /tmp/dashboard-mobile.js
+          grep -F 'cell.dataset.mobileLabel' /tmp/dashboard-mobile.js
           grep -F '.mobile-phone .mobile-tabbar' /tmp/dashboard-mobile.css
           grep -F '.mobile-phone .table-wrap tbody tr' /tmp/dashboard-mobile.css
           test -s /tmp/dashboard-core.js
