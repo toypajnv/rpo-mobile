@@ -152,7 +152,7 @@ jobs:
           curl -fsS --max-time 10 https://rpo-mng.ru/static/dashboard-mobile.css -o /tmp/dashboard-mobile.css
           grep -F 'dashboard-core.js?v=20260830-1' /tmp/dashboard-loader.js
           grep -F 'dashboard-ux.js?v=20260830-1' /tmp/dashboard-loader.js
-          grep -F 'dashboard-transmission-review.js?v=20260904-1' /tmp/dashboard-loader.js
+          # Transmission review remains available as an endpoint/asset, but is no longer loaded by the dashboard timer.
           grep -F 'dashboard-notifications.js?v=20260904-1' /tmp/dashboard-loader.js
           grep -F 'Требуют внимания' /tmp/dashboard-ux.js
           grep -F 'data-rpo-decision="denied"' /tmp/dashboard-decisions.js
