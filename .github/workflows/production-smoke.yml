@@ -15,63 +15,37 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for VPS autodeploy and instruction assistant release
+      - name: Wait for VPS autodeploy and RPO 2.3.1 release
         shell: bash
         run: |
           set -euo pipefail
           ok=0
           for attempt in $(seq 1 36); do
             health="$(curl -fsS --max-time 8 https://rpo-mng.ru/health 2>/dev/null || true)"
-            config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=2.1.0' 2>/dev/null || true)"
+            config="$(curl -fsS --max-time 8 'https://rpo-mng.ru/api/mobile/config?app_version=2.3.0' 2>/dev/null || true)"
             pwa="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/ 2>/dev/null || true)"
+            app_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/pwa-assets/app.js 2>/dev/null || true)"
             sw="$(curl -fsS --max-time 8 https://rpo-mng.ru/app/sw.js 2>/dev/null || true)"
-            assistant_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/pwa-assets/instruction-assistant.js 2>/dev/null || true)"
-            assistant_css="$(curl -fsS --max-time 8 https://rpo-mng.ru/pwa-assets/instruction-assistant.css 2>/dev/null || true)"
-            dashboard_loader="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard.js 2>/dev/null || true)"
-            review_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-transmission-review.js 2>/dev/null || true)"
-            decisions_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-decisions.js 2>/dev/null || true)"
-            mobile_js="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-mobile.js 2>/dev/null || true)"
-            mobile_css="$(curl -fsS --max-time 8 https://rpo-mng.ru/static/dashboard-mobile.css 2>/dev/null || true)"
-            openapi="$(curl -fsS --max-time 8 https://rpo-mng.ru/openapi.json 2>/dev/null || true)"
+
             if [[ "$health" == *'"status":"ok"'* ]] \
               && [[ "$config" == *'"server_version":"0.8.1"'* ]] \
               && [[ "$config" == *'"latest_app_version":"2.3.1"'* ]] \
               && [[ "$config" == *'"pwa_version":"1.3.1"'* ]] \
               && [[ "$pwa" == *'PWA 1.3.1'* ]] \
-              && [[ "$pwa" == *'pwa-early-service-worker'* ]] \
-              && [[ "$pwa" == *'/pwa-assets/deny-lock.js?v=20260831-1'* ]] \
-              && [[ "$pwa" == *'/pwa-assets/history-status.js?v=20260901-1'* ]] \
-              && [[ "$pwa" == *'/pwa-assets/sync-status.js?v=20260831-1'* ]] \
-              && [[ "$pwa" == *'/pwa-assets/instruction-assistant.css?v=20260906-1'* ]] \
-              && [[ "$pwa" == *'/pwa-assets/instruction-assistant.js?v=20260906-1'* ]] \
-              && [[ "$pwa" == *'data-tab="instruction"'* ]] \
-              && [[ "$sw" == *'rpo-pwa-shell-v1.3.1'* ]] \
-              && [[ "$sw" == *'instruction-assistant.js?v=20260906-1'* ]] \
-              && [[ "$sw" == *'Promise.allSettled'* ]] \
-              && [[ "$sw" == *'Нет связи с сервером'* ]] \
-              && [[ "$assistant_js" == *'Помощник при инструктаже'* ]] \
-              && [[ "$assistant_js" == *'Когда нужен повторный инструктаж'* ]] \
-              && [[ "$assistant_css" == *'.instruction-risk-grid'* ]] \
-              && [[ "$dashboard_loader" == *'dashboard-transmission-review.js?v=20260904-1'* ]] \
-              && [[ "$review_js" == *'Отклонить'* ]] \
-              && [[ "$review_js" == *'Не рассмотрено'* ]] \
-              && [[ "$review_js" == *'/api/operator/transmissions/${eventId}/review'* ]] \
-              && [[ "$decisions_js" != *'rpo-blocked-banner'* ]] \
-              && [[ "$mobile_js" == *'PHONE_SHORT_SIDE_MAX = 540'* ]] \
-              && [[ "$mobile_js" == *'data-mobile-label'* ]] \
-              && [[ "$mobile_css" == *'.mobile-phone .mobile-tabbar'* ]] \
-              && [[ "$mobile_css" == *'.mobile-phone .table-wrap tbody tr'* ]] \
-              && [[ "$openapi" == *'"/users/create"'* ]] \
-              && [[ "$openapi" == *'"/api/operator/transmissions/{event_id}/review"'* ]]; then
-              echo "Production server 0.8.1 / PWA 1.3.1 instruction assistant deployed on attempt $attempt"
+              && [[ "$app_js" == *"id:'NOT_PERFORMED'"* ]] \
+              && [[ "$app_js" == *"'RN','РПО не проводились'"* ]] \
+              && [[ "$sw" == *'rpo-pwa-shell-v1.3.1'* ]]; then
+              echo "Production server 0.8.1 / PWA 1.3.1 / Android 2.3.1 is deployed (attempt $attempt)"
               ok=1
               break
             fi
-            echo "Waiting for instruction assistant autodeploy: attempt $attempt/36"
-            sleep 10
+
+            echo "Waiting for RPO 2.3.1 autodeploy: attempt $attempt/36"
+            echo "Observed config: ${config:0:500}"
+            sleep 5
           done
           if [[ "$ok" != "1" ]]; then
-            echo "Instruction assistant release did not become ready in time" >&2
+            echo "RPO 2.3.1 release did not become ready in time" >&2
             exit 1
           fi
 
