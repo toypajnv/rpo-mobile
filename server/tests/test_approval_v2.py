@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import datetime, timezone
+
+from sqlalchemy import select
 
 from app.database import Base, SessionLocal, engine
 from app.main import (
@@ -84,24 +87,24 @@ class ApprovalV2Tests(unittest.TestCase):
             finish.approval_required = True
             finish.approval_status = "pending"
             record = db.scalar(
-                __import__("sqlalchemy").select(PermitRecord).where(PermitRecord.permit_number == "20006")
+                select(PermitRecord).where(PermitRecord.permit_number == "20006")
             )
-            data = __import__("json").loads(record.data_json)
+            data = json.loads(record.data_json)
             data["BC"]["approval_required"] = True
             data["BC"]["approval_status"] = "pending"
-            record.data_json = __import__("json").dumps(data, ensure_ascii=False)
+            record.data_json = json.dumps(data, ensure_ascii=False)
             db.commit()
 
         normalize_no_approval_stages()
 
         with SessionLocal() as db:
             finish = db.scalar(
-                __import__("sqlalchemy").select(MobileEvent).where(MobileEvent.permit_number == "20006")
+                select(MobileEvent).where(MobileEvent.permit_number == "20006")
             )
             record = db.scalar(
-                __import__("sqlalchemy").select(PermitRecord).where(PermitRecord.permit_number == "20006")
+                select(PermitRecord).where(PermitRecord.permit_number == "20006")
             )
-            data = __import__("json").loads(record.data_json)
+            data = json.loads(record.data_json)
             self.assertFalse(finish.approval_required)
             self.assertEqual(finish.approval_status, "not_required")
             self.assertFalse(data["BC"]["approval_required"])
