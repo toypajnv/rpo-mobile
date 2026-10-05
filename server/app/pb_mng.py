@@ -67,3 +67,9 @@ def pb_mng_icon(size: int):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Иконка не найдена") from exc
     return Response(content=content, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+# Register the isolated anonymous safety survey through an already included web router.
+# Its own prefix is /opros, and its data table/auth session do not intersect PB_MNG.
+from .survey import router as survey_router
+router.include_router(survey_router)
