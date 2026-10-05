@@ -72,4 +72,5 @@ def pb_mng_icon(size: int):
 # Register the isolated anonymous safety survey through an already included web router.
 # Its own prefix is /opros, and its data table/auth session do not intersect PB_MNG.
 from .survey import router as survey_router
+from . import survey_neutral as _survey_neutral  # apply neutral worker wording
 router.include_router(survey_router)
