@@ -31,12 +31,14 @@ def survey_answers():
     }
 
 
-def test_survey_page_is_public():
+def test_survey_page_is_public_and_neutral():
     with TestClient(app) as client:
         response = client.get("/opros/")
         assert response.status_code == 200
         assert "Опрос анонимный" in response.text
         assert "Статистика" in response.text
+        assert "Реакция работников на нарушения требований ПБ" in response.text
+        assert "подряд" not in response.text.lower()
 
 
 def test_survey_submission_and_q9_limit():
@@ -54,6 +56,22 @@ def test_survey_submission_and_q9_limit():
         ]
         rejected = client.post("/opros/api/responses", json={"answers": invalid})
         assert rejected.status_code == 422
+
+
+def test_neutral_worker_options_are_accepted():
+    with TestClient(app) as client:
+        answers = survey_answers()
+        answers.update(
+            {
+                "q1": "Сообщаю ответственному руководителю",
+                "q4": ["Не хочу вступать в конфликт", "Боюсь негативной реакции другого работника"],
+                "q5": "Сообщаю ответственному руководителю",
+                "q7": "Считает, что этим должен заниматься ответственный руководитель",
+                "q8": "Возникнут споры / конфликт",
+            }
+        )
+        response = client.post("/opros/api/responses", json={"answers": answers})
+        assert response.status_code == 200, response.text
 
 
 def test_survey_statistics_are_protected():
