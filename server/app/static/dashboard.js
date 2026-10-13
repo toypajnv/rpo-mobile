@@ -11,7 +11,7 @@
   // Decision controls are injected directly by the server-rendered dashboard HTML.
   // The old transmission-review renderer is intentionally not loaded: it rewrote
   // the same action column every 2.4 seconds and caused visible button blinking.
-  load('/static/dashboard-core.js?v=20260830-1')
+  load('/static/dashboard-core.js?v=20261013-1')
     .then(() => load('/static/dashboard-ux.js?v=20260830-1'))
     .then(() => load('/static/dashboard-notifications.js?v=20260904-1'))
     .catch((error) => console.error('RPO dashboard loader', error));

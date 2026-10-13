@@ -58,6 +58,7 @@ private fun persistSavedStageIds(context: Context, permitNumber: String, ids: Se
 
 private fun stageFingerprint(s: FormState): String = listOf(
     s.stage.id,
+    s.stageWorkerName,
     s.primaryDate,
     s.primaryTime,
     s.secondaryDate,
@@ -246,7 +247,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
             }
         }
 
-        Field("ФИО работника", s.workerName, vm::updateWorker, "Например: Иванов И.И.", s.errors["worker"])
+        Field("ФИО работника (по умолчанию)", s.workerName, vm::updateWorker, "Например: Иванов И.И.", s.errors["worker"])
         StructuralUnitPicker(s.structuralUnit, vm::updateStructuralUnit, s.errors["structuralUnit"])
         PermitField(s.permitNumber, permitMemories, vm::updatePermit, vm::selectPermit, s.errors["permit"])
         ApprovalStatusCard(s)
@@ -274,6 +275,15 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
                 )
             }
         }
+
+        Field(
+            "Ответственный за выбранный этап",
+            s.stageWorkerName.ifBlank { s.workerName },
+            vm::updateStageWorker,
+            "ФИО ответственного за этот этап",
+            s.errors["stageWorker"],
+        )
+        Text("Подготовку и проведение может передавать разный ответственный. ФИО сохраняется отдельно для каждого этапа.", color = Color.Gray, fontSize = 12.sp)
 
         when (s.stage.kind) {
             StageKind.RANGE_DATETIME -> {
@@ -440,7 +450,7 @@ private fun FormScreen(s: FormState, permitMemories: List<PermitMemory>, vm: Rpo
 
         Surface(color = Color(0xFFF0F8F3), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                CheckLine(s.workerName.trim().length >= 3, "ФИО указано")
+                CheckLine(s.stageWorkerName.trim().ifBlank { s.workerName.trim() }.length >= 3, "ФИО ответственного за этап указано")
                 CheckLine(s.structuralUnit in structuralUnits, "Структурное подразделение выбрано")
                 CheckLine(s.permitNumber.trim().length >= 3 && s.errors["permit"] == null, "Номер НД корректен")
                 CheckLine(stageDataReady(s), "Обязательные поля этапа заполнены")

@@ -46,6 +46,7 @@ data class PermitMemory(
 
 data class FormState(
     val workerName: String = "",
+    val stageWorkerName: String = "",
     val structuralUnit: String = "",
     val permitNumber: String = "",
     val stage: Stage = stages.first(),
@@ -159,8 +160,11 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         _permitMemories.value = limited
     }
 
+    private fun stageOwnerKey(permit: String, stageId: String) = "stage_owner_" + permit.trim().uppercase() + ":" + stageId
+
     private fun blankStageFields(base: FormState, stage: Stage = base.stage): FormState = base.copy(
         stage = stage,
+        stageWorkerName = prefs.getString(stageOwnerKey(base.permitNumber, stage.id), "") ?: "",
         primaryDate = "",
         primaryTime = "",
         secondaryDate = "",
@@ -200,6 +204,8 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             extensionDate = if (stage.kind == StageKind.EXTENSION_DATE) snapshot.fields[stage.first.key]?.field_value.orEmpty() else "",
             stopReason = if (stage.kind == StageKind.STOP) snapshot.fields[stage.first.key]?.comment.orEmpty() else "",
             comment = if (stage.kind == StageKind.STOP) "" else commonComment,
+            stageWorkerName = prefs.getString(stageOwnerKey(base.permitNumber, stage.id), "")?.takeIf { it.isNotBlank() }
+                ?: stageFields.firstOrNull { it.worker_name.isNotBlank() }?.worker_name.orEmpty(),
             replacements = if (stage.kind == StageKind.REPLACEMENTS) {
                 decodeReplacements(snapshot.fields[stage.first.key]?.field_value.orEmpty())
             } else listOf(ReplacementEntry()),
@@ -255,7 +261,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                     val snapshot = response.body() ?: return@launch
                     serverPermitSnapshot = snapshot
                     val filledKeys = snapshot.fields.filterValues { it.field_value.isNotBlank() }.keys
-                    val worker = snapshot.worker_name.ifBlank { _state.value.workerName }
+                    val worker = _state.value.workerName.ifBlank { snapshot.worker_name }
                     val unit = snapshot.structural_unit.ifBlank { _state.value.structuralUnit }
                     val base = _state.value.copy(
                         workerName = worker,
@@ -286,7 +292,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectPermit(memory: PermitMemory) {
-        val worker = memory.workerName.ifBlank { _state.value.workerName }
+        val worker = _state.value.workerName.ifBlank { memory.workerName }
         val unit = memory.structuralUnit.orEmpty().ifBlank { _state.value.structuralUnit }
         _state.value = blankStageFields(_state.value).copy(
             permitNumber = memory.permitNumber,
@@ -301,6 +307,14 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         if (worker.isNotBlank()) prefs.edit().putString("worker_name", worker).apply()
         if (unit.isNotBlank()) prefs.edit().putString("structural_unit", unit).apply()
         schedulePermitLookup(memory.permitNumber, immediate = true)
+    }
+
+    fun updateStageWorker(v: String) {
+        val value = v.take(180)
+        stageEdited()
+        val current = _state.value
+        _state.value = current.copy(stageWorkerName = value, errors = current.errors - "stageWorker", message = null)
+        prefs.edit().putString(stageOwnerKey(current.permitNumber, current.stage.id), value.trim()).apply()
     }
 
     fun updateWorker(v: String) {
@@ -417,6 +431,9 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
         val events = mutableListOf<PendingEvent>()
 
         if (s.workerName.trim().length < 3) errors["worker"] = "Укажите ФИО работника"
+        if (s.stageWorkerName.trim().ifBlank { s.workerName.trim() }.length < 3) {
+            errors["stageWorker"] = "Укажите ФИО ответственного за выбранный этап"
+        }
         structuralUnitError(s.structuralUnit)?.let { errors["structuralUnit"] = it }
         val permit = s.permitNumber.trim().uppercase()
         if (!permitRegex.matches(permit)) {
@@ -564,7 +581,8 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
                 serverComment = serverField?.comment,
                 newValue = event.fieldValue,
                 newComment = event.comment,
-            )
+            ) || (serverField != null && serverField.worker_name.trim().isNotBlank()
+                && serverField.worker_name.trim() != s.stageWorkerName.trim().ifBlank { s.workerName.trim() })
         }
         if (eventsToSend.isEmpty()) {
             _state.value = s.copy(
@@ -579,7 +597,7 @@ class RpoViewModel(app: Application) : AndroidViewModel(app) {
             EventRequest(
                 client_event_id = UUID.randomUUID().toString(),
                 device_id = deviceId,
-                worker_name = s.workerName.trim(),
+                worker_name = s.stageWorkerName.trim().ifBlank { s.workerName.trim() },
                 structural_unit = s.structuralUnit,
                 permit_number = s.permitNumber.trim().uppercase(),
                 field_key = event.stage.key,

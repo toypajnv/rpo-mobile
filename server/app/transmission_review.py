@@ -20,6 +20,8 @@ class TransmissionReviewRequest(BaseModel):
 def _field_from_event(event: MobileEvent) -> dict:
     return {
         "stage_label": event.stage_label,
+        "worker_name": event.worker_name,
+        "structural_unit": event.structural_unit or "",
         "field_value": event.field_value,
         "event_time": event.event_time.isoformat(),
         "comment": event.comment or "",
@@ -63,7 +65,9 @@ def install_transmission_review(core) -> None:
         record = db.scalar(select(PermitRecord).where(PermitRecord.permit_number == event.permit_number))
         data = record_data(record) if record else {}
         current = data.get(event.field_key) if isinstance(data.get(event.field_key), dict) else None
-        is_current = bool(current and current.get("client_event_id") == event.client_event_id)
+        is_current = bool(current and int(current.get("event_id") or 0) == event.id)
+        if not is_current:
+            raise HTTPException(status_code=409, detail="Этот этап уже заменён новой передачей. Рассмотрите актуальную запись.")
         restored_event_id: int | None = None
 
         if payload.decision == "rejected":

@@ -1,7 +1,8 @@
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
+import json
 from sqlalchemy.orm import Session
-from ..models import MobileEvent
+from ..models import MobileEvent, PermitRecord
 from ..schemas import EventCreate
 from ..stages import STAGES
 
@@ -36,19 +37,22 @@ def validate_event(db: Session, payload: EventCreate) -> None:
     if not after_key:
         return
 
-    previous = db.scalar(
-        select(MobileEvent)
-        .where(
-            MobileEvent.permit_number == payload.permit_number,
-            MobileEvent.field_key == after_key,
-        )
-        .order_by(MobileEvent.event_time.desc())
-        .limit(1)
+    # Validate against the current accepted transmission, not an obsolete
+    # timestamp from a corrected/superseded row.
+    record = db.scalar(
+        select(PermitRecord).where(PermitRecord.permit_number == payload.permit_number)
     )
-    if previous:
-        prev_time = _aware_utc(previous.event_time)
-        if event_time < prev_time:
+    try:
+        active = json.loads(record.data_json or "{}").get(after_key) if record else None
+    except (ValueError, TypeError, AttributeError):
+        active = None
+    if isinstance(active, dict) and active.get("event_time"):
+        try:
+            prev_time = _aware_utc(datetime.fromisoformat(str(active["event_time"]).replace("Z", "+00:00")))
+        except ValueError:
+            prev_time = None
+        if prev_time is not None and event_time < prev_time:
             raise EventValidationError(
-                f"Дата/время этапа не может быть раньше «{previous.stage_label}» "
+                f"Дата/время этапа не может быть раньше «{active.get('stage_label') or STAGES[after_key]['label']}» "
                 f"({prev_time.astimezone().strftime('%d.%m.%Y %H:%M')})"
             )
