@@ -40,7 +40,7 @@ class DashboardStaticTests(unittest.TestCase):
         self.assertIn("Ранее выгруженные НД тоже можно", template)
         self.assertIn("dashboard.js?v=20260829-2", template)
         self.assertIn("app.css?v=20260829-3", template)
-        self.assertIn("dashboard-core.js?v=20260830-1", loader)
+        self.assertIn("dashboard-core.js?v=20261013-1", loader)
         self.assertIn("dashboard-ux.js?v=20260830-1", loader)
         self.assertIn("preview-table", script)
         self.assertIn("stageDetails", script)
