@@ -78,7 +78,10 @@ def _acquire_semantic_lock(db: Session, payload) -> None:
         return
     db.execute(
         text("SELECT pg_advisory_xact_lock(:lock_id)"),
-        {"lock_id": _lock_id(_payload_semantic_key(payload))},
+        {"lock_id": _lock_id((
+            _normalize_text(payload.permit_number).upper(),
+            _normalize_text(payload.field_key).upper(),
+        ))},
     )
 
 
@@ -139,6 +142,8 @@ def _refresh_current_record(db: Session, event: MobileEvent) -> None:
 
     # Keep approval_status, approved_at, approved_by_id, denied_reason and any
     # future operator metadata already present in the canonical record.
+    current["worker_name"] = event.worker_name
+    current["structural_unit"] = event.structural_unit or ""
     current["stage_label"] = event.stage_label
     current["field_value"] = event.field_value
     current["event_time"] = event.event_time.isoformat()
