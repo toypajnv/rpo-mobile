@@ -86,7 +86,7 @@ jobs:
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw-headers.txt
           grep -F "rpo-pwa-shell-v1.3.2" /tmp/sw.js
           grep -F 'Promise.all' /tmp/sw.js
-          grep -F "caches.match('/app/')" /tmp/sw.js
+          grep -F "cache.match('/app/')" /tmp/sw.js
           grep -F 'Нет связи с сервером' /tmp/sw.js
           grep -F '/pwa-assets/sync-status.js?v=20260831-1' /tmp/sw.js
           grep -F '/pwa-assets/deny-lock.js?v=20260831-1' /tmp/sw.js
