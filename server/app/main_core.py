@@ -107,6 +107,8 @@ def _apply_event_to_record(db: Session, event: MobileEvent) -> PermitRecord:
     record = db.scalar(select(PermitRecord).where(PermitRecord.permit_number == event.permit_number))
     data = _safe_data(record.data_json if record else None)
     data[event.field_key] = {
+        "worker_name": event.worker_name,
+        "structural_unit": event.structural_unit or "",
         "stage_label": event.stage_label,
         "field_value": event.field_value,
         "event_time": event.event_time.isoformat(),
@@ -377,6 +379,8 @@ def _work_view(record: PermitRecord) -> dict:
             "key": key,
             "label": STAGES[key]["label"],
             "value": value,
+            "worker_name": str(field.get("worker_name") or record.worker_name),
+            "structural_unit": str(field.get("structural_unit") or record.structural_unit or ""),
             "comment": str(field.get("comment", "")).strip(),
             "event_id": int(field.get("event_id") or 0),
             "approval_required": bool(field.get("approval_required")),
@@ -410,6 +414,7 @@ def _preview_record(record: PermitRecord) -> dict:
         fields[key] = {
             "label": STAGES[key]["label"],
             "field_value": str(src.get("field_value", "")),
+            "worker_name": str(src.get("worker_name") or record.worker_name),
             "comment": str(src.get("comment", "")),
             "event_time": str(src.get("event_time", "")),
             "approval_status": str(src.get("approval_status", "not_required")),
@@ -745,6 +750,8 @@ def mobile_permit_lookup(
     fields = {
         key: {
             "field_value": str((data.get(key) or {}).get("field_value", "")),
+            "worker_name": str((data.get(key) or {}).get("worker_name") or record.worker_name),
+            "structural_unit": str((data.get(key) or {}).get("structural_unit") or record.structural_unit or ""),
             "event_time": str((data.get(key) or {}).get("event_time", "")),
             "comment": str((data.get(key) or {}).get("comment", "")),
             "event_id": int((data.get(key) or {}).get("event_id") or 0),
@@ -824,7 +831,8 @@ def dashboard_context(db: Session):
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     received_today = db.scalar(select(func.count()).select_from(PermitRecord).where(PermitRecord.updated_at >= day_start)) or 0
     pending = db.scalar(select(func.count()).select_from(PermitRecord).where(PermitRecord.exported_at.is_(None))) or 0
-    pending_approvals = db.scalar(select(func.count()).select_from(MobileEvent).where(MobileEvent.approval_status == "pending")) or 0
+    active_ids = _active_transmission_ids(db)
+    pending_approvals = db.scalar(select(func.count()).select_from(MobileEvent).where(MobileEvent.id.in_(active_ids), MobileEvent.approval_status == "pending")) or 0
     active_since = now - timedelta(hours=12)
     active_workers = db.scalar(select(func.count(func.distinct(PermitRecord.worker_name))).where(PermitRecord.updated_at >= active_since)) or 0
     last_export = db.scalar(select(ExportBatch).order_by(ExportBatch.created_at.desc()).limit(1))
@@ -832,7 +840,7 @@ def dashboard_context(db: Session):
     all_records = list(db.scalars(select(PermitRecord).order_by(PermitRecord.updated_at.desc())))
     works = [_work_view(record) for record in all_records[:200]]
     exports = list(db.scalars(select(ExportBatch).order_by(ExportBatch.created_at.desc()).limit(30)))
-    transmissions_raw = list(db.scalars(select(MobileEvent).order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc()).limit(300)))
+    transmissions_raw = list(db.scalars(select(MobileEvent).where(MobileEvent.id.in_(active_ids)).order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc()).limit(300)))
     transmissions = [
         {
             "id": event.id,
@@ -926,6 +934,27 @@ def operator_events(
     return result
 
 
+def _active_transmission_ids(db: Session) -> set[int]:
+    """Only the canonical latest record per permit and stage is actionable.
+
+    Previous transmissions stay in MobileEvent for audit and rollback. A
+    replacement never erases the initial worker, timestamp or decision history.
+    """
+    ids: set[int] = set()
+    for raw in db.scalars(select(PermitRecord.data_json)):
+        data = _safe_data(raw)
+        for field in data.values():
+            if not isinstance(field, dict):
+                continue
+            try:
+                value = int(field.get("event_id") or 0)
+            except (ValueError, TypeError):
+                value = 0
+            if value:
+                ids.add(value)
+    return ids
+
+
 @app.get("/api/operator/transmissions")
 def operator_transmissions(
     operator: Operator = Depends(current_operator),
@@ -934,7 +963,8 @@ def operator_transmissions(
     q: str = Query(default="", max_length=120),
     unit: str = Query(default="", max_length=80),
 ):
-    stmt = _apply_event_filters(select(MobileEvent), q, unit).order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc()).limit(limit)
+    active_ids = _active_transmission_ids(db)
+    stmt = _apply_event_filters(select(MobileEvent).where(MobileEvent.id.in_(active_ids)), q, unit).order_by(MobileEvent.received_at.desc(), MobileEvent.id.desc()).limit(limit)
     events = list(db.scalars(stmt))
     return [
         {
@@ -972,6 +1002,10 @@ def approve_mobile_event(
             "permit_number": event.permit_number,
             "message": "Для этого этапа решение оператора не требуется",
         }
+    record = db.scalar(select(PermitRecord).where(PermitRecord.permit_number == event.permit_number))
+    current = record_data(record).get(event.field_key) if record else None
+    if not isinstance(current, dict) or int(current.get("event_id") or 0) != event.id:
+        raise HTTPException(status_code=409, detail="Передача заменена новой. Рассмотрите последнее сообщение по этапу.")
     if event.approval_status == "approved":
         return {
             "status": "approved",
