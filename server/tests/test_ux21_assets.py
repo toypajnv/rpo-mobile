@@ -22,7 +22,7 @@ class Ux21AssetsTest(unittest.TestCase):
         ux = (APP_DIR / "static" / "dashboard-ux.js").read_text(encoding="utf-8")
         decisions = (APP_DIR / "static" / "dashboard-decisions.js").read_text(encoding="utf-8")
         review = (APP_DIR / "static" / "dashboard-transmission-review.js").read_text(encoding="utf-8")
-        self.assertIn("dashboard-core.js?v=20260830-1", loader)
+        self.assertIn("dashboard-core.js?v=20261013-1", loader)
         self.assertIn("dashboard-ux.js?v=20260830-1", loader)
         self.assertNotIn("dashboard-transmission-review.js", loader)
         self.assertIn("refreshWorks", core)
