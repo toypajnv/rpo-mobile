@@ -35,16 +35,16 @@ jobs:
 
           curl -fsS -D /tmp/sw.headers --max-time 15 'https://rpo-mng.ru/app/sw.js' -o /tmp/sw.js
           grep -Fi 'service-worker-allowed: /app/' /tmp/sw.headers
-          grep -F "const CACHE='rpo-pwa-shell-v1.3.0-r2'" /tmp/sw.js
+          grep -F "const CACHE='rpo-pwa-shell-v1.3.2-r1'" /tmp/sw.js
           grep -F "'/app/?home=20260915'" /tmp/sw.js
-          grep -F "fetch(req,{cache:'no-store'})" /tmp/sw.js
-          grep -F 'return offlineShell()' /tmp/sw.js
+          grep -F "fetch(request,{cache:'no-store'})" /tmp/sw.js
+          grep -F 'return cachedShell()' /tmp/sw.js
 
       - name: Verify Android APK target
         shell: bash
         run: |
           set -euo pipefail
-          url='https://github.com/toypajnv/rpo-mobile/releases/download/v2.3.0-test/rpo-mobile-2.3.0.apk'
+          url='https://github.com/toypajnv/rpo-mobile/releases/download/v2.3.2-test/rpo-mobile-2.3.2.apk'
           curl -fL --max-time 30 --retry 2 --range 0-1023 "$url" -o /tmp/rpo.apk.part
           test -s /tmp/rpo.apk.part
           echo 'Android APK download target OK'
