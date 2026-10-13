@@ -59,7 +59,7 @@ function stageDetails(e, isOpen=false){
   const lines=items.map(item=>{
     const action=item.approval_required&&item.approval_status!=='approved'&&Number(item.event_id)
       ? `<button type="button" class="approve-button small" data-approve-event="${Number(item.event_id)}">Разрешить</button>`:'';
-    return `<div class="stage-detail-line"><span><b>${esc(item.label)}</b><small>${esc(item.key)}</small></span><strong>${esc(item.value)}</strong>${item.comment?`<em>${esc(item.comment)}</em>`:''}<span class="stage-approval">${approvalBadge(item.approval_status,item.approval_required)}${action}</span></div>`;
+    return `<div class="stage-detail-line"><span><b>${esc(item.label)}</b><small>${esc(item.key)}</small></span><strong>${esc(item.value)}</strong><small>Ответственный: ${esc(item.worker_name||e.worker_name||'—')}</small>${item.comment?`<em>${esc(item.comment)}</em>`:''}<span class="stage-approval">${approvalBadge(item.approval_status,item.approval_required)}${action}</span></div>`;
   }).join('');
   return `<details class="stage-details" data-permit="${esc(e.permit_number)}"${isOpen?' open':''}><summary><span>${items.length} из ${total} этапов</span><small>Показать детали</small></summary><div class="stage-detail-list">${lines}</div></details>`;
 }
