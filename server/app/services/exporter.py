@@ -391,6 +391,8 @@ def build_export(records: list[PermitRecord], export_dir: str, batch_id: int) ->
             normalized_fields[key] = {
                 "label": field.get("stage_label") or STAGES[key]["label"],
                 "value": str(field.get("field_value", "") or ""),
+                "worker_name": str(field.get("worker_name") or record.worker_name),
+                "structural_unit": str(field.get("structural_unit") or record.structural_unit or ""),
                 "event_time": field.get("event_time", ""),
                 "comment": str(field.get("comment", "") or "").strip(),
                 "approval_status": field.get("approval_status", "not_required"),
