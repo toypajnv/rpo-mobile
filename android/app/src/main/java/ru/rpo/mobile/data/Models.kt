@@ -35,6 +35,7 @@ data class ApiError(val detail: String? = null)
 
 data class PermitFieldSnapshot(
     val field_value: String = "",
+    val worker_name: String = "",
     val event_time: String = "",
     val comment: String = "",
     val event_id: Long = 0,
