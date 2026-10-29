@@ -26,6 +26,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .database import Base, SessionLocal, engine, get_db
 from .security import verify_password
+from .vacancy_specialties import SPECIALTIES, classify_specialty, specialty_condition
 
 log = logging.getLogger("vacancies")
 router = APIRouter()
@@ -36,7 +37,7 @@ AUTH_ATTEMPTS: dict[str, tuple[int, float]] = {}
 SOURCES_FILTER = ("hh.ru", "career.sibur.ru", "siberia.transneft.ru", "novatek.ru",
                   "gazpromvacancy.ru", "rosneft.ru", "avito.ru")
 CITY_NAMES = ("Тюмень", "Нижневартовск")
-BRANDS = ("СИБУР", "Транснефть", "НОВАТЭК", "Газпром", "Роснефть")
+BRANDS = ("СИБУР", "Транснефть", "НОВАТЭК", "Газпром", "Роснефть", "Другие компании")
 BRAND_ALIASES = {
     "СИБУР": ("сибур", "запсибнефтехим", "сибуртобольск", "южно-балыкский гпз"),
     "Транснефть": ("транснефть",),
@@ -214,8 +215,9 @@ def parse_vacancy(item: dict, city: str) -> dict | None:
     employer = str((item.get("employer") or {}).get("name", "")).strip()
     brand = company_brand(employer)
     identifier = str(item.get("id", ""))
-    if not (brand and relevant_title(title) and identifier.isdigit()):
+    if not (title and identifier.isdigit()):
         return None
+    brand = brand or "Другие компании"
     schedule = (item.get("schedule") or {}).get("name", "")
     return {
         "source": "hh.ru",
@@ -357,12 +359,15 @@ def ru_date(value: datetime | None) -> str:
     return value.astimezone(RU_TIME).strftime("%d.%m.%Y %H:%M")
 
 
-def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = ""):
+def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = "", specialty: str = ""):
     query = select(TrackedVacancy).where(
         TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
     )
     if brand in BRANDS:
         query = query.where(TrackedVacancy.brand == brand)
+    specialty_filter = specialty_condition(TrackedVacancy.title, specialty)
+    if specialty_filter is not None:
+        query = query.where(specialty_filter)
     if source in SOURCES_FILTER:
         query = query.where(TrackedVacancy.source == source)
     if city in CITY_NAMES:
@@ -418,6 +423,7 @@ def vacancy_page(
     new: bool = Query(default=False),
     page: int = Query(default=1, ge=1, le=1000),
     source: str = Query(default="", max_length=30),
+    specialty: str = Query(default="", max_length=40),
     db: Session = Depends(get_db),
 ):
     from .vacancy_auth import vacancy_logged_in
@@ -427,7 +433,7 @@ def vacancy_page(
         request.session["vacancies_source_csrf"] = secrets.token_urlsafe(24)
     operator = SimpleNamespace(username="admin")
     disabled_sources = disabled_source_names(db)
-    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source)
+    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source, specialty)
     last_scan = db.scalar(select(VacancyScan).order_by(VacancyScan.id.desc()).limit(1))
     active_count = db.scalar(
         select(func.count()).select_from(TrackedVacancy).where(
@@ -449,6 +455,8 @@ def vacancy_page(
             "operator": operator, "vacancies": vacancies, "total": total,
             "active_count": active_count, "new_count": new_count, "scan": last_scan,
             "brands": BRANDS, "cities": CITY_NAMES,
+            "specialties": SPECIALTIES, "specialty": specialty,
+            "classify_specialty": classify_specialty,
             "sources": SOURCES_FILTER, "source": source,
             "disabled_sources": disabled_sources, "source_statuses": statuses,
             "source_csrf": request.session["vacancies_source_csrf"],
