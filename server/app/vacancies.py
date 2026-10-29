@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -54,7 +53,7 @@ IRRELEVANT = re.compile(
     r"физическ.{0,10}охран|охранник",
     re.IGNORECASE,
 )
-RU_TIME = ZoneInfo("Asia/Yekaterinburg")
+RU_TIME = timezone(timedelta(hours=5))  # Tyumen/Nizhnevartovsk: fixed UTC+5
 
 
 def now_utc() -> datetime:
