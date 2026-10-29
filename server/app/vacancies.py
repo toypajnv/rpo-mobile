@@ -372,6 +372,13 @@ def scan_once() -> tuple[str, int, str]:
         db.commit()
     return scan.status, total, scan.message
 
+def is_fresh(value: datetime | None) -> bool:
+    if not value:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value >= now_utc() - timedelta(hours=24)
+
 def ru_date(value: datetime | None) -> str:
     if not value:
         return "—"
@@ -524,7 +531,7 @@ def vacancy_page(
             "active_count": active_count, "new_count": new_count, "scan": last_scan,
             "brands": BRANDS, "cities": CITY_NAMES,
             "specialties": SPECIALTIES, "specialty": specialty,
-            "classify_specialty": classify_specialty,
+            "classify_specialty": classify_specialty, "is_fresh": is_fresh,
             "sources": SOURCES_FILTER, "source": source,
             "disabled_sources": disabled_sources, "source_statuses": statuses,
             "source_csrf": request.session["vacancies_source_csrf"],
