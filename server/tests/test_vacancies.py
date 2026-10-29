@@ -102,7 +102,7 @@ class TestVacancyFilters(unittest.TestCase):
     def test_page_requires_login(self):
         from fastapi.testclient import TestClient
         from app.main import app
-        with TestClient(app) as client:
+        with TestClient(app, base_url="https://testserver") as client:
             response = client.get("/vacancies", follow_redirects=False)
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers.get("location"), "/login")
