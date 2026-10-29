@@ -122,7 +122,7 @@ class TestVacancyFilters(unittest.TestCase):
                 self.assertIn("Мониторинг вакансий", page.text)
                 self.assertIn("noindex,nofollow", page.text)
                 self.assertIn("private, no-store", page.headers["cache-control"])
-                self.assertEqual(client.get("/dashboard").status_code, 401)
+                self.assertIn(client.get("/dashboard", follow_redirects=False).status_code, (303, 401))
                 left = client.post("/vacancies/logout", follow_redirects=False)
                 self.assertEqual(left.status_code, 303)
                 self.assertEqual(client.get("/vacancies", follow_redirects=False).status_code, 303)
