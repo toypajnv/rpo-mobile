@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import unittest
+import io
+import re
+from unittest.mock import MagicMock
+from urllib.request import Request as UrlRequest
+from urllib.parse import unquote
 import os
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -62,6 +67,19 @@ class TestVacancyFilters(unittest.TestCase):
         self.assertIsNone(vacancies.parse_vacancy(item, "Нижневартовск"))
         self.assertIsNone(vacancies.parse_vacancy({**item, "id": "not-number"}, "Тюмень"))
 
+    def test_headhunter_uses_urllib_request_not_fastapi_request(self):
+        class FakeResponse:
+            def __enter__(self):
+                return io.BytesIO(b'{"items":[],"pages":0}')
+            def __exit__(self, *_):
+                pass
+        with patch("app.vacancies.urlopen", return_value=FakeResponse()) as open_mock:
+            result = vacancies.hh_json("/vacancies", {"text": "охрана труда"})
+        self.assertEqual(result["items"], [])
+        request = open_mock.call_args.args[0]
+        self.assertIsInstance(request, UrlRequest)
+        self.assertIn("охрана", unquote(request.full_url))
+        self.assertEqual(request.get_header("Accept"), "application/json")
     def test_source_errors_never_bypass_captcha(self):
         with patch.object(vacancies, "hh_json", side_effect=RuntimeError("HTTP 403")):
             with self.assertRaisesRegex(RuntimeError, "403"):
@@ -70,6 +88,7 @@ class TestVacancyFilters(unittest.TestCase):
     def test_query_filters_and_new(self):
         engine = create_engine("sqlite://")
         vacancies.TrackedVacancy.__table__.create(engine)
+        vacancies.VacancySourceSetting.__table__.create(engine)
         current = datetime.now(timezone.utc)
         with Session(engine) as db:
             db.add_all([
@@ -122,6 +141,23 @@ class TestVacancyFilters(unittest.TestCase):
                 self.assertIn("Мониторинг вакансий", page.text)
                 self.assertIn("noindex,nofollow", page.text)
                 self.assertIn("private, no-store", page.headers["cache-control"])
+                self.assertIn("name=\"excluded\"", page.text)
+                self.assertIn("hh.ru", page.text)
+                csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+                self.assertIsNotNone(csrf)
+                changed = client.post("/vacancies/sources", data={
+                    "csrf_token": csrf.group(1), "excluded": ["avito.ru", "rosneft.ru"],
+                }, follow_redirects=False)
+                self.assertEqual(changed.status_code, 303)
+                with vacancies.SessionLocal() as db:
+                    self.assertEqual(vacancies.disabled_source_names(db), {"avito.ru", "rosneft.ru"})
+                page = client.get("/vacancies")
+                self.assertIn("Исключён из поиска", page.text)
+                csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text)
+                changed = client.post("/vacancies/sources", data={"csrf_token": csrf.group(1)}, follow_redirects=False)
+                self.assertEqual(changed.status_code, 303)
+                with vacancies.SessionLocal() as db:
+                    self.assertEqual(vacancies.disabled_source_names(db), set())
                 self.assertIn(client.get("/dashboard", follow_redirects=False).status_code, (303, 401))
                 left = client.post("/vacancies/logout", follow_redirects=False)
                 self.assertEqual(left.status_code, 303)

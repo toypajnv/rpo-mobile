@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import secrets
 from types import SimpleNamespace
 from typing import Annotated
 import logging
@@ -16,9 +17,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 
-from fastapi import APIRouter, Depends, Query, Request, Form
+from fastapi import APIRouter, Depends, Query, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -98,8 +99,37 @@ class VacancyScan(Base):
     message: Mapped[str] = mapped_column(Text, default="")
 
 
+class VacancySourceSetting(Base):
+    __tablename__ = "vacancy_source_settings"
+    source: Mapped[str] = mapped_column(String(30), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class VacancySourceStatus(Base):
+    __tablename__ = "vacancy_source_status"
+    source: Mapped[str] = mapped_column(String(30), primary_key=True)
+    state: Mapped[str] = mapped_column(String(24), default="not_checked")
+    found: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def disabled_source_names(db: Session) -> set[str]:
+    return {
+        name for name in db.scalars(
+            select(VacancySourceSetting.source).where(VacancySourceSetting.enabled.is_(False))
+        ) if name in SOURCES_FILTER
+    }
+
+
+def enabled_source_names(db: Session) -> tuple[str, ...]:
+    excluded = disabled_source_names(db)
+    return tuple(name for name in SOURCES_FILTER if name not in excluded)
+
 def init_tables() -> None:
-    Base.metadata.create_all(engine, tables=[TrackedVacancy.__table__, VacancyScan.__table__])
+    Base.metadata.create_all(engine, tables=[TrackedVacancy.__table__, VacancyScan.__table__,
+                                          VacancySourceSetting.__table__, VacancySourceStatus.__table__])
 
 
 def company_brand(company: str) -> str | None:
@@ -150,7 +180,7 @@ def hh_json(endpoint: str, params: dict | None = None) -> dict | list:
     url = "https://api.hh.ru" + endpoint
     if params:
         url += "?" + urlencode(params)
-    request = Request(url, headers=headers)
+    request = UrlRequest(url, headers=headers)
     try:
         with urlopen(request, timeout=20) as response:
             return json.load(response)
@@ -230,28 +260,54 @@ def fetch_current_vacancies() -> dict[str, dict]:
 
 
 def scan_once() -> tuple[str, int, str]:
-    """Refresh each source independently. A failed source keeps its previous data."""
+    """Check enabled sources only; preserve the last good data on source errors."""
     from .vacancy_sources import collect_sources
+
     init_tables()
     with SessionLocal() as db:
+        enabled = set(enabled_source_names(db))
         scan = VacancyScan(started_at=now_utc())
         db.add(scan)
         db.commit()
         scan_id = scan.id
-    collected = {}
-    errors = {}
-    try:
-        collected["hh.ru"] = fetch_current_vacancies()
-    except Exception as exc:
-        errors["hh.ru"] = str(exc)[:180]
-        log.warning("HeadHunter scan failed: %s", exc)
-    more, source_errors = collect_sources()
+
+    collected: dict[str, dict] = {}
+    errors: dict[str, str] = {}
+    if "hh.ru" in enabled:
+        try:
+            collected["hh.ru"] = fetch_current_vacancies()
+        except Exception as exc:
+            errors["hh.ru"] = str(exc)[:400]
+            log.warning("HeadHunter scan failed: %s", exc)
+    more, source_errors = collect_sources(enabled)
     collected.update(more)
     errors.update(source_errors)
+
     stamp = now_utc()
     total = 0
     with SessionLocal() as db:
-        for source, rows in collected.items():
+        for source in SOURCES_FILTER:
+            previous_status = db.get(VacancySourceStatus, source)
+            if previous_status is None:
+                previous_status = VacancySourceStatus(source=source)
+                db.add(previous_status)
+            if source not in enabled:
+                previous_status.state = "excluded"
+                previous_status.error = ""
+                previous_status.found = 0
+                previous_status.checked_at = stamp
+                continue
+            if source in errors:
+                previous_status.state = "error"
+                previous_status.error = errors[source]
+                previous_status.checked_at = stamp
+                # Retain the last successfully collected vacancy count.
+                continue
+            rows = collected.get(source, {})
+            previous_status.state = "ok"
+            previous_status.found = len(rows)
+            previous_status.error = ""
+            previous_status.checked_at = stamp
             existing = {
                 v.source_id: v for v in db.scalars(
                     select(TrackedVacancy).where(TrackedVacancy.source == source)
@@ -270,13 +326,26 @@ def scan_once() -> tuple[str, int, str]:
                 if ident not in rows:
                     vacancy.active = False
             total += len(rows)
+
         scan = db.get(VacancyScan, scan_id)
-        scan.status = "partial" if collected and errors else ("ok" if collected else "error")
+        if not enabled:
+            scan.status = "excluded"
+            scan.message = "Все источники исключены пользователем"
+        elif errors and collected:
+            scan.status = "partial"
+            scan.message = "; ".join(
+                f"{name}: {reason}" for name, reason in sorted(errors.items())
+            )[:3500]
+        elif errors:
+            scan.status = "error"
+            scan.message = "; ".join(
+                f"{name}: {reason}" for name, reason in sorted(errors.items())
+            )[:3500]
+        else:
+            scan.status = "ok"
+            scan.message = ""
         scan.found = total
         scan.finished_at = stamp
-        scan.message = "; ".join(
-            f"{name}: {reason}" for name, reason in sorted(errors.items())
-        )[:3500]
         db.commit()
     return scan.status, total, scan.message
 
@@ -289,7 +358,9 @@ def ru_date(value: datetime | None) -> str:
 
 
 def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = ""):
-    query = select(TrackedVacancy).where(TrackedVacancy.active.is_(True))
+    query = select(TrackedVacancy).where(
+        TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
+    )
     if brand in BRANDS:
         query = query.where(TrackedVacancy.brand == brand)
     if source in SOURCES_FILTER:
@@ -312,6 +383,32 @@ def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = ""
     return vacancies, total
 
 
+@router.post("/vacancies/sources", include_in_schema=False)
+def update_vacancy_sources(
+    request: Request,
+    excluded: Annotated[list[str] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+    db: Session = Depends(get_db),
+):
+    from .vacancy_auth import vacancy_logged_in
+    if not vacancy_logged_in(request):
+        return RedirectResponse("/vacancies/login", status_code=303)
+    expected = request.session.get("vacancies_source_csrf", "")
+    if not expected or not hmac.compare_digest(expected, csrf_token):
+        raise HTTPException(status_code=403, detail="Неверный токен формы")
+    selected = set(excluded or [])
+    if selected - set(SOURCES_FILTER):
+        raise HTTPException(status_code=422, detail="Неизвестный источник вакансий")
+    for source in SOURCES_FILTER:
+        setting = db.get(VacancySourceSetting, source)
+        if setting is None:
+            setting = VacancySourceSetting(source=source)
+            db.add(setting)
+        setting.enabled = source not in selected
+        setting.updated_at = now_utc()
+    db.commit()
+    return RedirectResponse("/vacancies?sources=updated", status_code=303)
+
 @router.get("/vacancies", response_class=HTMLResponse, include_in_schema=False)
 def vacancy_page(
     request: Request,
@@ -326,18 +423,25 @@ def vacancy_page(
     from .vacancy_auth import vacancy_logged_in
     if not vacancy_logged_in(request):
         return RedirectResponse("/vacancies/login", status_code=303)
+    if not request.session.get("vacancies_source_csrf"):
+        request.session["vacancies_source_csrf"] = secrets.token_urlsafe(24)
     operator = SimpleNamespace(username="admin")
+    disabled_sources = disabled_source_names(db)
     vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source)
     last_scan = db.scalar(select(VacancyScan).order_by(VacancyScan.id.desc()).limit(1))
     active_count = db.scalar(
-        select(func.count()).select_from(TrackedVacancy).where(TrackedVacancy.active.is_(True))
+        select(func.count()).select_from(TrackedVacancy).where(
+            TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
+        )
     ) or 0
     new_count = db.scalar(
         select(func.count()).select_from(TrackedVacancy).where(
             TrackedVacancy.active.is_(True),
+            TrackedVacancy.source.in_(enabled_source_names(db)),
             TrackedVacancy.first_seen_at >= now_utc() - timedelta(hours=24),
         )
     ) or 0
+    statuses = {v.source: v for v in db.scalars(select(VacancySourceStatus))}
     from .main_core import templates
     return templates.TemplateResponse(
         request=request, name="vacancies.html",
@@ -346,6 +450,8 @@ def vacancy_page(
             "active_count": active_count, "new_count": new_count, "scan": last_scan,
             "brands": BRANDS, "cities": CITY_NAMES,
             "sources": SOURCES_FILTER, "source": source,
+            "disabled_sources": disabled_sources, "source_statuses": statuses,
+            "source_csrf": request.session["vacancies_source_csrf"],
             "brand": brand, "city": city, "q": q, "new": new,
             "page": page, "page_count": (total + 49) // 50, "ru_date": ru_date,
             "new_since": now_utc() - timedelta(hours=24),

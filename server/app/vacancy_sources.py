@@ -245,19 +245,22 @@ def fetch_avito() -> dict[str, dict]:
     return result
 
 
-def collect_sources() -> tuple[dict[str, dict[str, dict]], dict[str, str]]:
+def collect_sources(enabled: set[str] | None = None) -> tuple[dict[str, dict[str, dict]], dict[str, str]]:
     """Each source is isolated. An inaccessible site does not block other sites."""
     collected = {}
     errors = {}
     for source in SOURCES:
+        if enabled is not None and source.name not in enabled:
+            continue
         try:
             collected[source.name] = fetch_official(source)
         except (HTTPError, URLError, TimeoutError, ValueError, RuntimeError, OSError) as exc:
             errors[source.name] = str(exc)[:180]
             log.warning("Official source %s failed: %s", source.name, exc)
-    try:
-        collected[AVITO_SOURCE] = fetch_avito()
-    except (HTTPError, URLError, TimeoutError, ValueError, RuntimeError, OSError) as exc:
-        errors[AVITO_SOURCE] = str(exc)[:180]
-        log.warning("Avito source unavailable: %s", exc)
+    if enabled is None or AVITO_SOURCE in enabled:
+        try:
+            collected[AVITO_SOURCE] = fetch_avito()
+        except (HTTPError, URLError, TimeoutError, ValueError, RuntimeError, OSError) as exc:
+            errors[AVITO_SOURCE] = str(exc)[:180]
+            log.warning("Avito source unavailable: %s", exc)
     return collected, errors
