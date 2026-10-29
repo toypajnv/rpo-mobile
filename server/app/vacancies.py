@@ -98,8 +98,37 @@ class VacancyScan(Base):
     message: Mapped[str] = mapped_column(Text, default="")
 
 
+class VacancySourceSetting(Base):
+    __tablename__ = "vacancy_source_settings"
+    source: Mapped[str] = mapped_column(String(30), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class VacancySourceStatus(Base):
+    __tablename__ = "vacancy_source_status"
+    source: Mapped[str] = mapped_column(String(30), primary_key=True)
+    state: Mapped[str] = mapped_column(String(24), default="not_checked")
+    found: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+def disabled_source_names(db: Session) -> set[str]:
+    return {
+        name for name in db.scalars(
+            select(VacancySourceSetting.source).where(VacancySourceSetting.enabled.is_(False))
+        ) if name in SOURCES_FILTER
+    }
+
+
+def enabled_source_names(db: Session) -> tuple[str, ...]:
+    excluded = disabled_source_names(db)
+    return tuple(name for name in SOURCES_FILTER if name not in excluded)
+
 def init_tables() -> None:
-    Base.metadata.create_all(engine, tables=[TrackedVacancy.__table__, VacancyScan.__table__])
+    Base.metadata.create_all(engine, tables=[TrackedVacancy.__table__, VacancyScan.__table__,
+                                          VacancySourceSetting.__table__, VacancySourceStatus.__table__])
 
 
 def company_brand(company: str) -> str | None:
