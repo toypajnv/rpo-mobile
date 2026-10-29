@@ -169,28 +169,66 @@ def _listing_rows(html: str, page: str, source: Source) -> list[dict]:
 
 
 def _novatek_rows(html: str, page: str) -> list[dict]:
-    """NOVATEK publishes grouped vacancies as text on an official single page."""
+    """Read only real job headings on NOVATEK career page, never job-description text.
+
+    The public page groups a company and location header followed by a job
+    title and its experience/duties/requirements. Its paragraphs and list items
+    are not separate vacancies. There is no verified publication timestamp.
+    """
     soup = BeautifulSoup(html, "html.parser")
+    for unwanted in soup(["script", "style", "noscript"]):
+        unwanted.decompose()
     text = soup.get_text("\n", strip=True)
-    blocks = re.split(r"(?=ООО\s+[«\"]?НОВАТЭК[^\n]{0,170}\(г\.\s*(?:Тюмень|Нижневартовск)\))", text, flags=re.I)
-    offers = []
+    # Each employer heading explicitly states the city. A header is not a
+    # vacancy until it is followed by a plausible job title + job-specific facts.
+    company_heading = re.compile(
+        r"(?=ООО\s+[«\"]?НОВАТЭК[^\n]{0,170}\(г\.\s*(?:Тюмень|Нижневартовск)\))",
+        re.I,
+    )
+    bad_title = re.compile(
+        r"^(?:важное уточнение|обязанности|требования|требуемый опыт|"
+        r"условия|полная занятость|необходимые знания|документирование|"
+        r"управление проектами\s*:|ключевые задачи|контакты|"
+        r"глубокие экспертные знания)", re.I,
+    )
+    offers: list[dict] = []
+    unique: set[str] = set()
+    blocks = company_heading.split(text)
     for block in blocks[1:]:
-        city = _city(block.split("\n", 1)[0])
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 3:
+            continue
+        employer = lines[0]
+        city = _city(employer)
         if not city:
             continue
-        lines = [x.strip() for x in block.splitlines() if x.strip()]
-        if len(lines) < 2:
+        # The position is the FIRST text after the employer header, never
+        # subsequent duties, bullet points or explanatory paragraphs.
+        title = lines[1].strip(" \t–—•")
+        if (not 8 <= len(title) <= 150 or len(title.split()) < 2
+                or title.endswith(":") or bad_title.search(title)):
             continue
-        for index, line in enumerate(lines[1:20], 1):
-            if len(line) >= 8 and len(line) < 180 and not line.startswith(("Требования", "Обязанности", "Контакты")):
-                identifier = slug_id(page + city + line)
-                offers.append({
-                    "source": "novatek.ru", "source_id": identifier, "brand": "НОВАТЭК",
-                    "employer": lines[0][:255], "title": line, "city": city, "url": page,
-                    "salary": "", "schedule": "", "published_at": datetime.now(timezone.utc),
-                })
+        # A job title must be backed by nearby vacancy metadata, not just by
+        # the employer being mentioned in a general article/footer.
+        context = " ".join(lines[2:9]).casefold()
+        if not any(marker in context for marker in (
+            "требуемый опыт", "занятость", "обязанности", "требования",
+            "условия работы", "опыт работы",
+        )):
+            continue
+        ident = slug_id(page + "|" + employer.casefold() + "|" + title.casefold())
+        if ident in unique:
+            continue
+        unique.add(ident)
+        offers.append({
+            "source": "novatek.ru", "source_id": ident, "brand": "НОВАТЭК",
+            "employer": employer[:255], "title": title, "city": city,
+            "url": page, "salary": "", "schedule": "",
+            # The official page does not state a publication date. This
+            # placeholder is only for database ordering, not for UI display.
+            "published_at": datetime.now(timezone.utc),
+        })
     return offers
-
 
 def fetch_official(source: Source) -> dict[str, dict]:
     result = {}
