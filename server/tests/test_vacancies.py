@@ -106,8 +106,22 @@ class TestVacancyFilters(unittest.TestCase):
             response = client.get("/vacancies", follow_redirects=False)
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers.get("location"), "/login")
+            from app.database import SessionLocal
+            from app.models import Operator
+            from app.security import hash_password
+            with SessionLocal() as db:
+                db.add(Operator(
+                    username="vacancies_test_user",
+                    password_hash=hash_password("VacanciesTestPassword123!"),
+                    role="manager",
+                    is_active=True,
+                ))
+                db.commit()
             response = client.post(
-                "/login", data={"username": "admin", "password": "QualityGate123!"},
+                "/login", data={
+                    "username": "vacancies_test_user",
+                    "password": "VacanciesTestPassword123!",
+                },
                 follow_redirects=False,
             )
             self.assertEqual(response.status_code, 303)
