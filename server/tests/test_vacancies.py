@@ -88,6 +88,7 @@ class TestVacancyFilters(unittest.TestCase):
     def test_query_filters_and_new(self):
         engine = create_engine("sqlite://")
         vacancies.TrackedVacancy.__table__.create(engine)
+        vacancies.VacancySourceSetting.__table__.create(engine)
         current = datetime.now(timezone.utc)
         with Session(engine) as db:
             db.add_all([
