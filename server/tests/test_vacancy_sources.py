@@ -1,9 +1,40 @@
 """Public source parsing must fail closed and never fabricate unverified listings."""
 import unittest
 from unittest.mock import patch
-from app.vacancy_sources import Source, _listing_rows, _avito_rows, safe_url, collect_sources, _robots_allowed
+from app.vacancy_sources import Source, _listing_rows, _avito_rows, safe_url, collect_sources, _robots_allowed, _novatek_rows
 
 class VacancySourceTests(unittest.TestCase):
+    def test_novatek_extracts_one_real_job_not_its_description(self):
+        html = """<html><body>
+        <h1>Открытые вакансии</h1>
+        <p>ООО «НОВАТЭК НАУЧНО-ТЕХНИЧЕСКИЙ ЦЕНТР» (г. Тюмень):</p>
+        <h2>Руководитель инновационных технологических проектов</h2>
+        <div>Требуемый опыт работы: Не менее 7 лет</div>
+        <p>Полная занятость, полный день</p>
+        <b>Обязанности:</b>
+        <ul><li>Управление проектами: полный цикл управления технологическими проектами</li>
+        <li>Документирование: обеспечение надлежащего документирования проектов</li></ul>
+        <b>Требования:</b>
+        <p>Важное уточнение:</p>
+        <p>Глубокие экспертные знания (например, в гидродинамическом моделировании) не требуются.</p>
+        </body></html>"""
+        page = "https://www.novatek.ru/ru/about/career/jobs/"
+        results = _novatek_rows(html, page)
+        self.assertEqual(len(results), 1, results)
+        self.assertEqual(results[0]["title"], "Руководитель инновационных технологических проектов")
+        self.assertEqual(results[0]["city"], "Тюмень")
+        self.assertEqual(results[0]["url"], page)
+
+    def test_novatek_rejects_heading_without_job_metadata(self):
+        html = """<p>ООО «НОВАТЭК НАУЧНО-ТЕХНИЧЕСКИЙ ЦЕНТР» (г. Тюмень):</p>
+            <p>Важное уточнение:</p><p>Глубокие экспертные знания не требуются.</p>"""
+        self.assertEqual(_novatek_rows(html, "https://www.novatek.ru/ru/about/career/jobs/"), [])
+
+    def test_novatek_deduplicates_same_vacancy_heading(self):
+        block = """<div>ООО «НОВАТЭК НАУЧНО-ТЕХНИЧЕСКИЙ ЦЕНТР» (г. Тюмень):</div>
+            <h3>Руководитель инновационных технологических проектов</h3>
+            <p>Требуемый опыт работы: не менее 7 лет</p>"""
+        self.assertEqual(len(_novatek_rows(block + block, "https://www.novatek.ru/ru/about/career/jobs/")), 1)
     def test_official_gazprom_listing_requires_city_and_title(self):
         html = """<html><body>
           <article><span>Тюменская область, г. Тюмень</span>
