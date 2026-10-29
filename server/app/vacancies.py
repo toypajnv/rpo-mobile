@@ -288,10 +288,12 @@ def ru_date(value: datetime | None) -> str:
     return value.astimezone(RU_TIME).strftime("%d.%m.%Y %H:%M")
 
 
-def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1):
+def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = ""):
     query = select(TrackedVacancy).where(TrackedVacancy.active.is_(True))
     if brand in BRANDS:
         query = query.where(TrackedVacancy.brand == brand)
+    if source in SOURCES_FILTER:
+        query = query.where(TrackedVacancy.source == source)
     if city in CITY_NAMES:
         query = query.where(TrackedVacancy.city == city)
     if text:
@@ -318,13 +320,14 @@ def vacancy_page(
     q: str = Query(default="", max_length=100),
     new: bool = Query(default=False),
     page: int = Query(default=1, ge=1, le=1000),
+    source: str = Query(default="", max_length=30),
     db: Session = Depends(get_db),
 ):
-    operator_id = request.session.get("operator_id")
-    operator = db.get(Operator, operator_id) if isinstance(operator_id, int) else None
-    if not operator or not operator.is_active:
-        return RedirectResponse("/login", status_code=303)
-    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page)
+    from .vacancy_auth import vacancy_logged_in
+    if not vacancy_logged_in(request):
+        return RedirectResponse("/vacancies/login", status_code=303)
+    operator = SimpleNamespace(username="admin")
+    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source)
     last_scan = db.scalar(select(VacancyScan).order_by(VacancyScan.id.desc()).limit(1))
     active_count = db.scalar(
         select(func.count()).select_from(TrackedVacancy).where(TrackedVacancy.active.is_(True))
@@ -342,6 +345,7 @@ def vacancy_page(
             "operator": operator, "vacancies": vacancies, "total": total,
             "active_count": active_count, "new_count": new_count, "scan": last_scan,
             "brands": BRANDS, "cities": CITY_NAMES,
+            "sources": SOURCES_FILTER, "source": source,
             "brand": brand, "city": city, "q": q, "new": new,
             "page": page, "page_count": (total + 49) // 50, "ru_date": ru_date,
             "new_since": now_utc() - timedelta(hours=24),
