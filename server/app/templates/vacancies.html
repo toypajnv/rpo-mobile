@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="refresh" content="600">
+<title>Мониторинг вакансий — РПО</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:#172e44;background:#f2f5f9}
+*{box-sizing:border-box}
+body{margin:0}
+a{color:#1868ac}
+.header{background:#fff;border-bottom:1px solid #e3eaf1}
+.bar{max-width:1240px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 24px}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#163e63;color:#fff;font-weight:800}
+.brand b{font-size:17px}
+.muted{color:#64768a}
+.small{font-size:12px}
+.header-actions{display:flex;align-items:center;gap:18px}
+.header-actions form{margin:0}
+.linklike{background:none;border:0;color:#475f75;cursor:pointer;font:inherit}
+.container{max-width:1240px;margin:0 auto;padding:30px 24px 56px}
+.intro{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:23px}
+h1{font-size:clamp(26px,3.2vw,36px);letter-spacing:-.035em;margin:0 0 8px}
+.sub{color:#65788e;font-size:14px;margin:0;line-height:1.5}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#236849;border-radius:999px;background:#e5f5ed;padding:9px 12px;white-space:nowrap}
+.status.error{color:#9b4125;background:#fff1e8}
+.status.pending{color:#6e7583;background:#e7ecf2}
+.dot{width:7px;height:7px;background:currentColor;border-radius:50%}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:23px}
+.metric,.filters,.vacancy,.notice,.empty{background:#fff;border:1px solid #e4eaf0;box-shadow:0 3px 16px rgba(29,56,81,.035);border-radius:17px}
+.metric{padding:20px 23px}
+.metric .kicker{color:#657a8d;font-size:12px;font-weight:650}
+.metric strong{display:block;margin-top:9px;font-size:30px;letter-spacing:-.035em}
+.metric .foot{margin-top:4px;color:#8291a0;font-size:12px}
+.filters{padding:20px 21px;margin-bottom:22px}
+.filter-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 15px}
+.filter-head b{font-size:16px}
+.filters-grid{display:grid;grid-template-columns:1.2fr 1.2fr 1.6fr auto;gap:12px;align-items:end}
+label{font-size:12px;color:#52677c;font-weight:650;display:grid;gap:7px}
+select,input[type=search]{height:43px;width:100%;padding:0 13px;background:#fcfdfe;border:1px solid #d8e0e9;border-radius:10px;font:inherit;font-size:13px;color:#193850}
+select:focus,input:focus{outline:2px solid #afd5fa;outline-offset:1px}
+button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#215f96;padding:0 23px;font-weight:700;cursor:pointer}
+.chips{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:17px}
+.chips label{display:flex;align-items:center;gap:8px;color:#3f596f;font-weight:550;font-size:13px}
+.chips input{accent-color:#246da4}
+.chips a{font-size:13px;text-decoration:none;margin-left:auto}
+.list-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 3px 14px}
+.list-top h2{font-size:19px;margin:0}
+.list-top span{color:#75889a;font-size:13px}
+.cards{display:grid;gap:12px}
+.vacancy{padding:19px 22px;transition:border-color .15s}
+.vacancy:hover{border-color:#c4d7e9}
+.row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.vacancy h3{font-size:18px;letter-spacing:-.02em;line-height:1.35;margin:0 0 9px}
+.vacancy h3 a{text-decoration:none;color:#194d7c}
+.vacancy h3 a:hover{text-decoration:underline}
+.badges{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+.tag{font-size:11px;color:#305a79;background:#edf4fa;border-radius:8px;padding:5px 9px;font-weight:650}
+.tag.new{color:#18764a;background:#e2f7eb}
+.company{font-size:13px;color:#41576a;font-weight:650;margin:12px 0 5px}
+.meta{display:flex;gap:16px;flex-wrap:wrap;color:#748697;font-size:12px;margin-top:11px}
+.salary{white-space:nowrap;color:#1c4b42;font-weight:750;font-size:16px}
+.goto{display:inline-flex;align-items:center;gap:6px;margin-top:15px;font-size:12px;font-weight:700;text-decoration:none}
+.notice{margin-bottom:18px;padding:14px 18px;color:#86542b;border-color:#f3dfc8;background:#fffaf3;font-size:13px;line-height:1.5}
+.notice code{font-size:12px}
+.empty{padding:45px 22px;text-align:center;color:#718092}
+.empty b{display:block;color:#324e67;font-size:16px;margin-bottom:9px}
+.pager{display:flex;align-items:center;justify-content:center;gap:22px;margin:26px}
+.pager a{background:#fff;border:1px solid #dce4eb;border-radius:9px;text-decoration:none;padding:10px 15px;font-size:13px;font-weight:700}
+.pager span{font-size:13px;color:#597087}
+.footer{margin-top:35px;font-size:12px;color:#8291a1;line-height:1.6}
+@media(max-width:740px){
+.bar{padding:15px}.header-actions{gap:8px}.header-actions .user{display:none}
+.container{padding:20px 14px 38px}.intro{align-items:flex-start;flex-direction:column}
+.metrics{grid-template-columns:1fr 1fr;gap:9px}.metrics .metric:last-child{grid-column:span 2}.metric{padding:15px}
+.metric strong{font-size:25px}.filters{padding:15px}
+.filters-grid{grid-template-columns:1fr 1fr}
+.filters-grid label:nth-child(3){grid-column:span 2}
+.filters-grid .primary{grid-column:span 2}
+.row{flex-direction:column}.salary{order:2}
+.vacancy{padding:17px}.vacancy h3{font-size:16px}
+}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="bar">
+    <div class="brand">
+      <div class="logo">Р</div>
+      <div><b>Мониторинг вакансий</b><div class="muted small">Производственная безопасность</div></div>
+    </div>
+    <div class="header-actions">
+      <span class="muted small user">{{ operator.username }}</span>
+      <a class="small" href="/dashboard">Панель РПО</a>
+      <form action="/logout" method="post"><button class="linklike small" type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+<main class="container">
+  <div class="intro">
+    <div>
+      <h1>Вакансии по безопасности</h1>
+      <p class="sub">СИБУР · Транснефть · НОВАТЭК · Газпром · Роснефть<br>Нижневартовск и Тюмень · Проверка каждый час</p>
+    </div>
+    {% if scan and scan.status == 'ok' %}
+      <span class="status"><i class="dot"></i> Проверено {{ ru_date(scan.finished_at) }}</span>
+    {% elif scan and scan.status == 'error' %}
+      <span class="status error"><i class="dot"></i> Ошибка источника</span>
+    {% else %}
+      <span class="status pending"><i class="dot"></i> Ожидается первая проверка</span>
+    {% endif %}
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><div class="kicker">Актуальных вакансий</div><strong>{{ active_count }}</strong><div class="foot">По пяти группам компаний</div></div>
+    <div class="metric"><div class="kicker">Новых за 24 часа</div><strong>{{ new_count }}</strong><div class="foot">Впервые найдены мониторингом</div></div>
+    <div class="metric"><div class="kicker">Периодичность</div><strong>60 <span style="font-size:16px">мин</span></strong><div class="foot">Автоматическая проверка</div></div>
+  </div>
+
+  {% if scan and scan.status == 'error' %}
+  <div class="notice"><b>Не удалось обновить вакансии.</b> Последние успешно найденные данные сохранены.<br>
+    {{ scan.message }}<br>
+    {% if 'TOKEN' in scan.message or '403' in scan.message or '401' in scan.message %}
+      Для доступа к API зарегистрируйте приложение на <a href="https://dev.hh.ru/" target="_blank" rel="noopener noreferrer">dev.hh.ru</a> и задайте OAuth-токен <code>HH_API_TOKEN</code> в настройках сервера.
+    {% endif %}
+  </div>
+  {% elif not scan %}
+  <div class="notice">Сборщик данных ещё не выполнил первую проверку. Результаты появятся здесь после успешного запуска фонового сервиса.</div>
+  {% endif %}
+
+  <form class="filters" method="get" action="/vacancies">
+    <div class="filter-head"><b>Фильтры</b><span class="muted small">Данные: HeadHunter</span></div>
+    <div class="filters-grid">
+      <label>Компания
+        <select name="brand" onchange="this.form.submit()">
+          <option value="">Все компании</option>
+          {% for item in brands %}<option value="{{ item }}" {% if brand == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Город
+        <select name="city" onchange="this.form.submit()">
+          <option value="">Оба города</option>
+          {% for item in cities %}<option value="{{ item }}" {% if city == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Поиск по должности или работодателю
+        <input type="search" name="q" value="{{ q }}" placeholder="Например, ведущий специалист">
+      </label>
+      <button class="primary" type="submit">Найти</button>
+    </div>
+    <div class="chips">
+      <label><input type="checkbox" name="new" value="true" {% if new %}checked{% endif %} onchange="this.form.submit()"> Только новые за 24 часа</label>
+      <a href="/vacancies">Сбросить фильтры</a>
+    </div>
+  </form>
+
+  <div class="list-top">
+    <h2>Найденные вакансии</h2>
+    <span>Показано {{ vacancies|length }} из {{ total }}</span>
+  </div>
+  <section class="cards">
+  {% for item in vacancies %}
+    <article class="vacancy">
+      <div class="row">
+        <div>
+          <h3><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a></h3>
+          <div class="badges">
+            <span class="tag">{{ item.brand }}</span>
+            <span class="tag">{{ item.city }}</span>
+            {% if item.first_seen_at >= new_since %}<span class="tag new">Новая</span>{% endif %}
+          </div>
+        </div>
+        {% if item.salary %}<div class="salary">{{ item.salary }}</div>{% endif %}
+      </div>
+      <p class="company">{{ item.employer }}</p>
+      <div class="meta">
+        <span>Опубликовано {{ ru_date(item.published_at) }}</span>
+        {% if item.schedule %}<span>{{ item.schedule }}</span>{% endif %}
+        <span>Источник: hh.ru</span>
+      </div>
+      <a class="goto" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Открыть оригинал вакансии ↗</a>
+    </article>
+  {% else %}
+    <div class="empty">
+      <b>По заданным условиям вакансий пока нет</b>
+      {% if scan and scan.status == 'ok' %}
+      Новые подходящие вакансии появятся автоматически после очередной проверки.
+      {% else %}
+      Проверьте состояние источника данных выше.
+      {% endif %}
+    </div>
+  {% endfor %}
+  </section>
+
+  {% if page_count > 1 %}
+  <nav class="pager" aria-label="Страницы">
+    {% if page > 1 %}<a href="{{ request.url.include_query_params(page=page-1) }}">← Назад</a>{% endif %}
+    <span>{{ page }} / {{ page_count }}</span>
+    {% if page < page_count %}<a href="{{ request.url.include_query_params(page=page+1) }}">Далее →</a>{% endif %}
+  </nav>
+  {% endif %}
+  <p class="footer">
+    Вакансии сохраняются в отдельные таблицы и не связаны с данными нарядов-допусков.
+    Время указано по Тюмени (UTC+5). Публикации на корпоративных сайтах, отсутствующие на HeadHunter, могут не отображаться.
+    Вакансия может быть закрыта работодателем между проверками.
+  </p>
+</main>
+</body>
+</html>
