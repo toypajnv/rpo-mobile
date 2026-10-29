@@ -48,6 +48,14 @@ class VacancySourceTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "robots.txt"):
                 _robots_allowed("https://www.avito.ru/tyumen/vakansii")
 
+    def test_excluded_sites_are_not_requested(self):
+        with patch("app.vacancy_sources.fetch_official") as fetch_official, \
+             patch("app.vacancy_sources.fetch_avito") as fetch_avito:
+            collected, errors = collect_sources({"career.sibur.ru"})
+        self.assertEqual(errors, {})
+        self.assertEqual(list(collected), ["career.sibur.ru"])
+        fetch_official.assert_called_once()
+        fetch_avito.assert_not_called()
     def test_one_source_error_does_not_stop_others(self):
         with patch("app.vacancy_sources.fetch_official") as official, \
              patch("app.vacancy_sources.fetch_avito", return_value={}):
