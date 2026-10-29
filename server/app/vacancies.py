@@ -6,6 +6,9 @@ login-protected corporate websites. A separate worker performs hourly scans.
 from __future__ import annotations
 
 import json
+import hmac
+from types import SimpleNamespace
+from typing import Annotated
 import logging
 import os
 import re
@@ -15,16 +18,22 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .database import Base, SessionLocal, engine, get_db
-from .models import Operator
+from .security import verify_password
 
 log = logging.getLogger("vacancies")
 router = APIRouter()
+DEFAULT_VACANCY_HASH = "$argon2id$v=19$m=65536,t=3,p=2$PHzNhBhkRwGqf3zcVPwRKg$TEvXaJFAtfrji6qKFfclzav/fyMGn1YbZgV6ecC6Oos"
+# A salted password verifier, not plaintext; override via VACANCY_ADMIN_PASSWORD_HASH.
+VACANCY_SESSION_HOURS = 8
+AUTH_ATTEMPTS: dict[str, tuple[int, float]] = {}
+SOURCES_FILTER = ("hh.ru", "career.sibur.ru", "siberia.transneft.ru", "novatek.ru",
+                  "gazpromvacancy.ru", "rosneft.ru", "avito.ru")
 CITY_NAMES = ("Тюмень", "Нижневартовск")
 BRANDS = ("СИБУР", "Транснефть", "НОВАТЭК", "Газпром", "Роснефть")
 BRAND_ALIASES = {
