@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+import os
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -99,38 +100,32 @@ class TestVacancyFilters(unittest.TestCase):
             self.assertEqual(count, 2)
 
 
-    def test_page_requires_login(self):
+    def test_page_requires_separate_vacancy_login(self):
         from fastapi.testclient import TestClient
         from app.main import app
-        with TestClient(app, base_url="https://testserver") as client:
-            response = client.get("/vacancies", follow_redirects=False)
-            self.assertEqual(response.status_code, 303)
-            self.assertEqual(response.headers.get("location"), "/login")
-            from app.database import SessionLocal
-            from app.models import Operator
-            from app.security import hash_password
-            with SessionLocal() as db:
-                db.add(Operator(
-                    username="vacancies_test_user",
-                    password_hash=hash_password("VacanciesTestPassword123!"),
-                    role="manager",
-                    is_active=True,
-                ))
-                db.commit()
-            response = client.post(
-                "/login", data={
-                    "username": "vacancies_test_user",
-                    "password": "VacanciesTestPassword123!",
-                },
-                follow_redirects=False,
-            )
-            self.assertEqual(response.status_code, 303)
-            page = client.get("/vacancies")
-            self.assertEqual(page.status_code, 200, page.text[:500])
-            self.assertIn("Мониторинг вакансий", page.text)
-            self.assertIn("noindex,nofollow", page.text)
-            self.assertIn("private, no-store", page.headers["cache-control"])
-
+        from app.security import hash_password
+        with patch.dict(os.environ, {"VACANCY_ADMIN_PASSWORD_HASH": hash_password("DummyTestPass!2026") }):
+            with TestClient(app, base_url="https://testserver") as client:
+                response = client.get("/vacancies", follow_redirects=False)
+                self.assertEqual(response.status_code, 303)
+                self.assertEqual(response.headers.get("location"), "/vacancies/login")
+                bad = client.post("/vacancies/login", data={"username": "admin", "password": "wrong"})
+                self.assertEqual(bad.status_code, 400)
+                self.assertIn("Неверный", bad.text)
+                logged = client.post(
+                    "/vacancies/login", data={"username": "admin", "password": "DummyTestPass!2026"},
+                    follow_redirects=False,
+                )
+                self.assertEqual(logged.status_code, 303)
+                page = client.get("/vacancies")
+                self.assertEqual(page.status_code, 200, page.text[:500])
+                self.assertIn("Мониторинг вакансий", page.text)
+                self.assertIn("noindex,nofollow", page.text)
+                self.assertIn("private, no-store", page.headers["cache-control"])
+                self.assertIn(client.get("/dashboard", follow_redirects=False).status_code, (303, 401))
+                left = client.post("/vacancies/logout", follow_redirects=False)
+                self.assertEqual(left.status_code, 303)
+                self.assertEqual(client.get("/vacancies", follow_redirects=False).status_code, 303)
 
 if __name__ == "__main__":
     unittest.main()

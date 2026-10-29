@@ -20,7 +20,7 @@ jobs:
           found=0
           for attempt in $(seq 1 36); do
             code="$(curl -sS --max-time 8 -D /tmp/vacancy-headers -o /dev/null -w "%{http_code}" https://rpo-mng.ru/vacancies || true)"
-            if [[ "$code" == "303" ]] && grep -qiE "^location: /login([[:space:]]|\?)" /tmp/vacancy-headers; then
+            if [[ "$code" == "303" ]] && grep -qiE "^location: /vacancies/login([[:space:]]|\?)" /tmp/vacancy-headers; then
               echo "Vacancy page requires login; deployed (attempt $attempt)"
               found=1
               break

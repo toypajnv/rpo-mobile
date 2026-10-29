@@ -24,6 +24,8 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       SECRET_KEY: ${SECRET_KEY:-change_me_please}
+      VACANCY_ADMIN_USERNAME: ${VACANCY_ADMIN_USERNAME:-admin}
+      VACANCY_ADMIN_PASSWORD_HASH: ${VACANCY_ADMIN_PASSWORD_HASH:-}
       DATABASE_URL: postgresql+psycopg://rpo:${POSTGRES_PASSWORD:-change_me}@db:5432/rpo
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}

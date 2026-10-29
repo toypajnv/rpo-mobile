@@ -6,6 +6,9 @@ login-protected corporate websites. A separate worker performs hourly scans.
 from __future__ import annotations
 
 import json
+import hmac
+from types import SimpleNamespace
+from typing import Annotated
 import logging
 import os
 import re
@@ -15,16 +18,22 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .database import Base, SessionLocal, engine, get_db
-from .models import Operator
+from .security import verify_password
 
 log = logging.getLogger("vacancies")
 router = APIRouter()
+DEFAULT_VACANCY_HASH = "$argon2id$v=19$m=65536,t=3,p=2$PHzNhBhkRwGqf3zcVPwRKg$TEvXaJFAtfrji6qKFfclzav/fyMGn1YbZgV6ecC6Oos"
+# A salted password verifier, not plaintext; override via VACANCY_ADMIN_PASSWORD_HASH.
+VACANCY_SESSION_HOURS = 8
+AUTH_ATTEMPTS: dict[str, tuple[int, float]] = {}
+SOURCES_FILTER = ("hh.ru", "career.sibur.ru", "siberia.transneft.ru", "novatek.ru",
+                  "gazpromvacancy.ru", "rosneft.ru", "avito.ru")
 CITY_NAMES = ("Тюмень", "Нижневартовск")
 BRANDS = ("СИБУР", "Транснефть", "НОВАТЭК", "Газпром", "Роснефть")
 BRAND_ALIASES = {
@@ -221,50 +230,55 @@ def fetch_current_vacancies() -> dict[str, dict]:
 
 
 def scan_once() -> tuple[str, int, str]:
+    """Refresh each source independently. A failed source keeps its previous data."""
+    from .vacancy_sources import collect_sources
     init_tables()
     with SessionLocal() as db:
         scan = VacancyScan(started_at=now_utc())
         db.add(scan)
         db.commit()
         scan_id = scan.id
+    collected = {}
+    errors = {}
     try:
-        rows = fetch_current_vacancies()
-        stamp = now_utc()
-        with SessionLocal() as db:
+        collected["hh.ru"] = fetch_current_vacancies()
+    except Exception as exc:
+        errors["hh.ru"] = str(exc)[:180]
+        log.warning("HeadHunter scan failed: %s", exc)
+    more, source_errors = collect_sources()
+    collected.update(more)
+    errors.update(source_errors)
+    stamp = now_utc()
+    total = 0
+    with SessionLocal() as db:
+        for source, rows in collected.items():
             existing = {
-                v.source_id: v
-                for v in db.scalars(select(TrackedVacancy).where(TrackedVacancy.source == "hh.ru"))
+                v.source_id: v for v in db.scalars(
+                    select(TrackedVacancy).where(TrackedVacancy.source == source)
+                )
             }
             for ident, values in rows.items():
                 vacancy = existing.get(ident)
                 if vacancy is None:
-                    vacancy = TrackedVacancy(**values, first_seen_at=stamp, last_seen_at=stamp)
-                    db.add(vacancy)
+                    db.add(TrackedVacancy(**values, first_seen_at=stamp, last_seen_at=stamp))
                 else:
                     for key, value in values.items():
                         setattr(vacancy, key, value)
                     vacancy.active = True
                     vacancy.last_seen_at = stamp
-            for ident, old in existing.items():
+            for ident, vacancy in existing.items():
                 if ident not in rows:
-                    old.active = False
-            scan = db.get(VacancyScan, scan_id)
-            scan.status = "ok"
-            scan.found = len(rows)
-            scan.finished_at = stamp
-            db.commit()
-        return "ok", len(rows), ""
-    except Exception as exc:
-        message = str(exc)[:900]
-        log.warning("Vacancy refresh failed: %s", message)
-        with SessionLocal() as db:
-            scan = db.get(VacancyScan, scan_id)
-            scan.status = "error"
-            scan.message = message
-            scan.finished_at = now_utc()
-            db.commit()
-        return "error", 0, message
-
+                    vacancy.active = False
+            total += len(rows)
+        scan = db.get(VacancyScan, scan_id)
+        scan.status = "partial" if collected and errors else ("ok" if collected else "error")
+        scan.found = total
+        scan.finished_at = stamp
+        scan.message = "; ".join(
+            f"{name}: {reason}" for name, reason in sorted(errors.items())
+        )[:3500]
+        db.commit()
+    return scan.status, total, scan.message
 
 def ru_date(value: datetime | None) -> str:
     if not value:
@@ -274,10 +288,12 @@ def ru_date(value: datetime | None) -> str:
     return value.astimezone(RU_TIME).strftime("%d.%m.%Y %H:%M")
 
 
-def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1):
+def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = ""):
     query = select(TrackedVacancy).where(TrackedVacancy.active.is_(True))
     if brand in BRANDS:
         query = query.where(TrackedVacancy.brand == brand)
+    if source in SOURCES_FILTER:
+        query = query.where(TrackedVacancy.source == source)
     if city in CITY_NAMES:
         query = query.where(TrackedVacancy.city == city)
     if text:
@@ -304,13 +320,14 @@ def vacancy_page(
     q: str = Query(default="", max_length=100),
     new: bool = Query(default=False),
     page: int = Query(default=1, ge=1, le=1000),
+    source: str = Query(default="", max_length=30),
     db: Session = Depends(get_db),
 ):
-    operator_id = request.session.get("operator_id")
-    operator = db.get(Operator, operator_id) if isinstance(operator_id, int) else None
-    if not operator or not operator.is_active:
-        return RedirectResponse("/login", status_code=303)
-    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page)
+    from .vacancy_auth import vacancy_logged_in
+    if not vacancy_logged_in(request):
+        return RedirectResponse("/vacancies/login", status_code=303)
+    operator = SimpleNamespace(username="admin")
+    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source)
     last_scan = db.scalar(select(VacancyScan).order_by(VacancyScan.id.desc()).limit(1))
     active_count = db.scalar(
         select(func.count()).select_from(TrackedVacancy).where(TrackedVacancy.active.is_(True))
@@ -328,6 +345,7 @@ def vacancy_page(
             "operator": operator, "vacancies": vacancies, "total": total,
             "active_count": active_count, "new_count": new_count, "scan": last_scan,
             "brands": BRANDS, "cities": CITY_NAMES,
+            "sources": SOURCES_FILTER, "source": source,
             "brand": brand, "city": city, "q": q, "new": new,
             "page": page, "page_count": (total + 49) // 50, "ru_date": ru_date,
             "new_since": now_utc() - timedelta(hours=24),
