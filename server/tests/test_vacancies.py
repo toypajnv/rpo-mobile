@@ -99,5 +99,24 @@ class TestVacancyFilters(unittest.TestCase):
             self.assertEqual(count, 2)
 
 
+    def test_page_requires_login(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with TestClient(app) as client:
+            response = client.get("/vacancies", follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers.get("location"), "/login")
+            response = client.post(
+                "/login", data={"username": "admin", "password": "QualityGate123!"},
+                follow_redirects=False,
+            )
+            self.assertEqual(response.status_code, 303)
+            page = client.get("/vacancies")
+            self.assertEqual(page.status_code, 200, page.text[:500])
+            self.assertIn("Мониторинг вакансий", page.text)
+            self.assertIn("noindex,nofollow", page.text)
+            self.assertIn("private, no-store", page.headers["cache-control"])
+
+
 if __name__ == "__main__":
     unittest.main()
