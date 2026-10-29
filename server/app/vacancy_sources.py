@@ -43,6 +43,8 @@ SOURCES = (
     Source("novatek.ru", "НОВАТЭК", ("https://www.novatek.ru/ru/about/career/jobs/",), "www.novatek.ru"),
     Source("gazpromvacancy.ru", "Газпром", (
         "https://www.gazpromvacancy.ru/vacancies/",
+        "https://www.gazpromvacancy.ru/vacancies/region/tjumenskaja-oblast/",
+        "https://www.gazpromvacancy.ru/vacancies/region/khmao-jugra/",
     ), "www.gazpromvacancy.ru"),
     Source("rosneft.ru", "Роснефть", ("https://www.rosneft.ru/about/career/",), "www.rosneft.ru"),
 )
@@ -225,7 +227,7 @@ def _avito_rows(html: str, page: str, city: str) -> list[dict]:
             continue
         rows[slug_id(href)] = {
             "source": AVITO_SOURCE, "source_id": slug_id(href), "brand": brand,
-            "employer": brand, "title": title[:500], "city": city, "url": href,
+            "employer": "На Авито указано: " + brand + " (не подтверждено)", "title": title[:500], "city": city, "url": href,
             "salary": "", "schedule": "", "published_at": datetime.now(timezone.utc),
         }
     return list(rows.values())
