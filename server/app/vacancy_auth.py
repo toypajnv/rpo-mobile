@@ -42,7 +42,7 @@ def vacancy_login(request: Request, username: Annotated[str, Form()], password: 
             status_code=429, headers={"Cache-Control": "private, no-store"},
         )
     user = os.getenv("VACANCY_ADMIN_USERNAME", "admin")
-    password_hash = os.getenv("VACANCY_ADMIN_PASSWORD_HASH", DEFAULT_HASH)
+    password_hash = os.getenv("VACANCY_ADMIN_PASSWORD_HASH", "").strip() or DEFAULT_HASH
     valid = hmac.compare_digest(username.strip(), user) and verify_password(password, password_hash)
     if not valid:
         attempts = count + 1
