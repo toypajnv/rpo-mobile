@@ -83,6 +83,21 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
 .row{flex-direction:column}.salary{order:2}
 .vacancy{padding:17px}.vacancy h3{font-size:16px}
 }
+.sources-settings{background:#fff;border:1px solid #e4eaf0;border-radius:17px;padding:19px 21px;margin-bottom:20px}
+.sources-settings h2{margin:0 0 7px;font-size:17px}
+.sources-desc{font-size:12px;line-height:1.5;color:#64768a;margin:0 0 15px}
+.source-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px}
+.source-entry{display:flex;align-items:center;gap:8px;border:1px solid #e6ebf0;border-radius:10px;padding:10px 12px;min-width:0}
+.source-entry input{width:16px;height:16px;accent-color:#c05c42}
+.source-entry .source-info{display:grid;gap:4px;min-width:0}
+.source-entry strong{font-size:13px;white-space:normal;word-break:break-word}
+.source-entry small{font-size:11px;color:#77879a;font-weight:500;line-height:1.35}
+.source-entry.off{background:#fff8f6;border-color:#f0d9d2}
+.source-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:13px}
+.source-actions button{background:#194f80;color:#fff;padding:10px 18px;border:0;border-radius:9px;font-weight:700;cursor:pointer}
+.source-actions span{font-size:12px;color:#678095}
+.source-hint{font-size:12px;color:#476b50;background:#eaf6ee;padding:10px 13px;border-radius:10px;margin-bottom:15px}
+@media(max-width:740px){.source-list{grid-template-columns:1fr}.sources-settings{padding:15px}}
 </style>
 </head>
 <body>
@@ -131,7 +146,33 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
   <div class="notice">Сборщик данных ещё не выполнил первую проверку. Результаты появятся здесь после успешного запуска фонового сервиса.</div>
   {% endif %}
 
-  <form class="filters" method="get" action="/vacancies">
+  {% if request.query_params.get("sources") == "updated" %}
+<div class="source-hint">Настройки источников сохранены. Исключённые сайты сразу скрыты из списка. Поиск по остальным продолжится при следующем почасовом обходе.</div>
+{% endif %}
+<form class="sources-settings" action="/vacancies/sources" method="post">
+  <input type="hidden" name="csrf_token" value="{{ source_csrf }}">
+  <h2>Исключить сайты из автоматического поиска</h2>
+  <p class="sources-desc">Отметьте галочкой сайты, которые <b>не нужно проверять</b>. Ошибка одного источника не мешает остальным. Выбор сохранится на сервере.</p>
+  <div class="source-list">
+    {% for item in sources %}
+    {% set status = source_statuses.get(item) %}
+    <label class="source-entry{% if item in disabled_sources %} off{% endif %}">
+      <input type="checkbox" name="excluded" value="{{ item }}" {% if item in disabled_sources %}checked{% endif %}>
+      <span class="source-info">
+        <strong>{{ item }}</strong>
+        <small>
+          {% if item in disabled_sources %}Исключён из поиска
+          {% elif status and status.state == "ok" %}Проверен · найдено: {{ status.found }}
+          {% elif status and status.state == "error" %}Ошибка проверки{% if status.error %}: {{ status.error[:95] }}{% endif %}
+          {% else %}Ещё не проверялся{% endif %}
+        </small>
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+  <div class="source-actions"><button type="submit">Сохранить исключения</button><span>Опрос остальных сайтов — каждый час.</span></div>
+</form>
+<form class="filters" method="get" action="/vacancies">
     <div class="filter-head"><b>Фильтры</b><span class="muted small">HeadHunter · официальные сайты · Авито</span></div>
     <div class="filters-grid">
       <label>Компания
@@ -191,11 +232,11 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
     </article>
   {% else %}
     <div class="empty">
-      <b>По заданным условиям вакансий пока нет</b>
+      <b>Нет вакансий из доступных и выбранных источников</b>
       {% if scan and scan.status == 'ok' %}
-      Новые подходящие вакансии появятся автоматически после очередной проверки.
+      Если все включённые источники проверены успешно, подходящих объявлений по фильтрам пока нет.
       {% else %}
-      Проверьте состояние источника данных выше.
+      Часть сайтов не удалось проверить. Посмотрите статус каждого источника выше.
       {% endif %}
     </div>
   {% endfor %}
