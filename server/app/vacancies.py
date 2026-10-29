@@ -230,50 +230,55 @@ def fetch_current_vacancies() -> dict[str, dict]:
 
 
 def scan_once() -> tuple[str, int, str]:
+    """Refresh each source independently. A failed source keeps its previous data."""
+    from .vacancy_sources import collect_sources
     init_tables()
     with SessionLocal() as db:
         scan = VacancyScan(started_at=now_utc())
         db.add(scan)
         db.commit()
         scan_id = scan.id
+    collected = {}
+    errors = {}
     try:
-        rows = fetch_current_vacancies()
-        stamp = now_utc()
-        with SessionLocal() as db:
+        collected["hh.ru"] = fetch_current_vacancies()
+    except Exception as exc:
+        errors["hh.ru"] = str(exc)[:180]
+        log.warning("HeadHunter scan failed: %s", exc)
+    more, source_errors = collect_sources()
+    collected.update(more)
+    errors.update(source_errors)
+    stamp = now_utc()
+    total = 0
+    with SessionLocal() as db:
+        for source, rows in collected.items():
             existing = {
-                v.source_id: v
-                for v in db.scalars(select(TrackedVacancy).where(TrackedVacancy.source == "hh.ru"))
+                v.source_id: v for v in db.scalars(
+                    select(TrackedVacancy).where(TrackedVacancy.source == source)
+                )
             }
             for ident, values in rows.items():
                 vacancy = existing.get(ident)
                 if vacancy is None:
-                    vacancy = TrackedVacancy(**values, first_seen_at=stamp, last_seen_at=stamp)
-                    db.add(vacancy)
+                    db.add(TrackedVacancy(**values, first_seen_at=stamp, last_seen_at=stamp))
                 else:
                     for key, value in values.items():
                         setattr(vacancy, key, value)
                     vacancy.active = True
                     vacancy.last_seen_at = stamp
-            for ident, old in existing.items():
+            for ident, vacancy in existing.items():
                 if ident not in rows:
-                    old.active = False
-            scan = db.get(VacancyScan, scan_id)
-            scan.status = "ok"
-            scan.found = len(rows)
-            scan.finished_at = stamp
-            db.commit()
-        return "ok", len(rows), ""
-    except Exception as exc:
-        message = str(exc)[:900]
-        log.warning("Vacancy refresh failed: %s", message)
-        with SessionLocal() as db:
-            scan = db.get(VacancyScan, scan_id)
-            scan.status = "error"
-            scan.message = message
-            scan.finished_at = now_utc()
-            db.commit()
-        return "error", 0, message
-
+                    vacancy.active = False
+            total += len(rows)
+        scan = db.get(VacancyScan, scan_id)
+        scan.status = "partial" if collected and errors else ("ok" if collected else "error")
+        scan.found = total
+        scan.finished_at = stamp
+        scan.message = "; ".join(
+            f"{name}: {reason}" for name, reason in sorted(errors.items())
+        )[:3500]
+        db.commit()
+    return scan.status, total, scan.message
 
 def ru_date(value: datetime | None) -> str:
     if not value:
