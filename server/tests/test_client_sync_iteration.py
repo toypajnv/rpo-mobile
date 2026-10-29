@@ -1,4 +1,7 @@
 import unittest
+from datetime import datetime, timedelta, timezone
+
+TEST_EVENT_TIME = (datetime.now(timezone.utc) - timedelta(hours=2)).replace(microsecond=0).isoformat()
 
 from fastapi.testclient import TestClient
 
@@ -14,7 +17,7 @@ def _payload(client_event_id: str):
         "permit_number": "НД-ПОДСКАЗКА-2908",
         "field_key": "AT",
         "stage_label": "Начало подготовки",
-        "event_time": "2026-08-29T15:00:00+00:00",
+        "event_time": TEST_EVENT_TIME,
         "field_value": "29.08.2026 20:00",
         "comment": "",
     }

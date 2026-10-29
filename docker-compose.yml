@@ -71,6 +71,20 @@ services:
       STOP_IMAP_UKZ_SUBJECT: ${STOP_IMAP_UKZ_SUBJECT:-Стоп-лист УКЗ}
       STOP_IMAP_POLL_SECONDS: ${STOP_IMAP_POLL_SECONDS:-60}
 
+  vacancies-worker:
+    build: ./server
+    restart: unless-stopped
+    command: ["python", "-m", "app.vacancy_worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://rpo:${POSTGRES_PASSWORD:-change_me}@db:5432/rpo
+      HH_API_TOKEN: ${HH_API_TOKEN:-}
+      HH_USER_AGENT: ${HH_USER_AGENT:-RPOVacancies/1.0 (rpo@rpo-mng.ru)}
+      VACANCY_SCAN_INTERVAL_SECONDS: "3600"
+      PYTHONDONTWRITEBYTECODE: "1"
+
 volumes:
   postgres_data:
   server_data:

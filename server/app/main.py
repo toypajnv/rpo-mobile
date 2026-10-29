@@ -256,3 +256,8 @@ app.include_router(pb_mng_router)
 # PB_MNG stop-work process API, coordinator workspace and live access restrictions.
 from .pb_mng_process import router as pb_mng_process_router
 app.include_router(pb_mng_process_router)
+
+
+# Separate career monitoring area; uses existing login and separate database tables.
+from .vacancies import router as vacancies_router
+app.include_router(vacancies_router)
