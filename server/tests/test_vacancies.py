@@ -195,6 +195,24 @@ class TestVacancyFilters(unittest.TestCase):
                 with vacancies.SessionLocal() as db:
                     self.assertEqual(vacancies.disabled_source_names(db), set())
                 self.assertIn(client.get("/dashboard", follow_redirects=False).status_code, (303, 401))
+                added = client.post("/vacancies/add-avito", data={
+                    "csrf_token": csrf.group(1),
+                    "url": "https://www.avito.ru/tyumen/vakansii/inzhener_po_ohrane_truda_9234567890?utm=test",
+                    "title": "Инженер по охране труда",
+                    "employer": "ООО Тестовый работодатель",
+                    "city": "Тюмень",
+                }, follow_redirects=False)
+                self.assertEqual(added.status_code, 303, added.text)
+                page = client.get("/vacancies", params={"specialty": "labor"})
+                self.assertIn("Инженер по охране труда", page.text)
+                invalid = client.post("/vacancies/add-avito", data={
+                    "csrf_token": csrf.group(1),
+                    "url": "https://example.com/tyumen/vakansii/fake_9234567890",
+                    "title": "Инженер по охране труда",
+                    "employer": "Подставная компания",
+                    "city": "Тюмень",
+                }, follow_redirects=False)
+                self.assertEqual(invalid.status_code, 422)
                 left = client.post("/vacancies/logout", follow_redirects=False)
                 self.assertEqual(left.status_code, 303)
                 self.assertEqual(client.get("/vacancies", follow_redirects=False).status_code, 303)
