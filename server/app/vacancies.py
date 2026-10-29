@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import secrets
 from types import SimpleNamespace
 from typing import Annotated
 import logging
@@ -18,7 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request as UrlRequest, urlopen
 
-from fastapi import APIRouter, Depends, Query, Request, Form
+from fastapi import APIRouter, Depends, Query, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -357,7 +358,9 @@ def ru_date(value: datetime | None) -> str:
 
 
 def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = ""):
-    query = select(TrackedVacancy).where(TrackedVacancy.active.is_(True))
+    query = select(TrackedVacancy).where(
+        TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
+    )
     if brand in BRANDS:
         query = query.where(TrackedVacancy.brand == brand)
     if source in SOURCES_FILTER:
@@ -380,6 +383,32 @@ def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = ""
     return vacancies, total
 
 
+@router.post("/vacancies/sources", include_in_schema=False)
+def update_vacancy_sources(
+    request: Request,
+    excluded: Annotated[list[str] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+    db: Session = Depends(get_db),
+):
+    from .vacancy_auth import vacancy_logged_in
+    if not vacancy_logged_in(request):
+        return RedirectResponse("/vacancies/login", status_code=303)
+    expected = request.session.get("vacancies_source_csrf", "")
+    if not expected or not hmac.compare_digest(expected, csrf_token):
+        raise HTTPException(status_code=403, detail="Неверный токен формы")
+    selected = set(excluded or [])
+    if selected - set(SOURCES_FILTER):
+        raise HTTPException(status_code=422, detail="Неизвестный источник вакансий")
+    for source in SOURCES_FILTER:
+        setting = db.get(VacancySourceSetting, source)
+        if setting is None:
+            setting = VacancySourceSetting(source=source)
+            db.add(setting)
+        setting.enabled = source not in selected
+        setting.updated_at = now_utc()
+    db.commit()
+    return RedirectResponse("/vacancies?sources=updated", status_code=303)
+
 @router.get("/vacancies", response_class=HTMLResponse, include_in_schema=False)
 def vacancy_page(
     request: Request,
@@ -394,18 +423,25 @@ def vacancy_page(
     from .vacancy_auth import vacancy_logged_in
     if not vacancy_logged_in(request):
         return RedirectResponse("/vacancies/login", status_code=303)
+    if not request.session.get("vacancies_source_csrf"):
+        request.session["vacancies_source_csrf"] = secrets.token_urlsafe(24)
     operator = SimpleNamespace(username="admin")
+    disabled_sources = disabled_source_names(db)
     vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source)
     last_scan = db.scalar(select(VacancyScan).order_by(VacancyScan.id.desc()).limit(1))
     active_count = db.scalar(
-        select(func.count()).select_from(TrackedVacancy).where(TrackedVacancy.active.is_(True))
+        select(func.count()).select_from(TrackedVacancy).where(
+            TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
+        )
     ) or 0
     new_count = db.scalar(
         select(func.count()).select_from(TrackedVacancy).where(
             TrackedVacancy.active.is_(True),
+            TrackedVacancy.source.in_(enabled_source_names(db)),
             TrackedVacancy.first_seen_at >= now_utc() - timedelta(hours=24),
         )
     ) or 0
+    statuses = {v.source: v for v in db.scalars(select(VacancySourceStatus))}
     from .main_core import templates
     return templates.TemplateResponse(
         request=request, name="vacancies.html",
@@ -414,6 +450,8 @@ def vacancy_page(
             "active_count": active_count, "new_count": new_count, "scan": last_scan,
             "brands": BRANDS, "cities": CITY_NAMES,
             "sources": SOURCES_FILTER, "source": source,
+            "disabled_sources": disabled_sources, "source_statuses": statuses,
+            "source_csrf": request.session["vacancies_source_csrf"],
             "brand": brand, "city": city, "q": q, "new": new,
             "page": page, "page_count": (total + 49) // 50, "ru_date": ru_date,
             "new_since": now_utc() - timedelta(hours=24),
