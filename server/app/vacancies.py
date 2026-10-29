@@ -342,6 +342,11 @@ def scan_once() -> tuple[str, int, str]:
                     db.add(TrackedVacancy(**values, first_seen_at=stamp, last_seen_at=stamp))
                 else:
                     for key, value in values.items():
+                        # Company sites often omit publication dates. Keep the
+                        # original first-detected ordering date rather than
+                        # falsely changing it on each hourly refresh.
+                        if key == "published_at" and source != "hh.ru":
+                            continue
                         setattr(vacancy, key, value)
                     vacancy.active = True
                     vacancy.last_seen_at = stamp
