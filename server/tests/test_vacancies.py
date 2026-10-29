@@ -6,6 +6,7 @@ import io
 import re
 from unittest.mock import MagicMock
 from urllib.request import Request as UrlRequest
+from urllib.parse import unquote
 import os
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -77,7 +78,7 @@ class TestVacancyFilters(unittest.TestCase):
         self.assertEqual(result["items"], [])
         request = open_mock.call_args.args[0]
         self.assertIsInstance(request, UrlRequest)
-        self.assertIn("охрана", request.full_url)
+        self.assertIn("охрана", unquote(request.full_url))
         self.assertEqual(request.get_header("Accept"), "application/json")
     def test_source_errors_never_bypass_captcha(self):
         with patch.object(vacancies, "hh_json", side_effect=RuntimeError("HTTP 403")):
