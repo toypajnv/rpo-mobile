@@ -27,6 +27,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from .database import Base, SessionLocal, engine, get_db
 from .security import verify_password
 from .vacancy_specialties import SPECIALTIES, classify_specialty, specialty_condition
+from .vacancy_hh_oauth import get_access_token
 
 log = logging.getLogger("vacancies")
 router = APIRouter()
@@ -171,13 +172,12 @@ def salary_text(value: dict | None) -> str:
 
 def hh_json(endpoint: str, params: dict | None = None) -> dict | list:
     """Use registered hh.ru API; never bypass captcha or robots protection."""
-    token = os.getenv("HH_API_TOKEN", "").strip()
+    token = get_access_token()
     headers = {
-        "User-Agent": os.getenv("HH_USER_AGENT", "RPOVacancies/1.0 (rpo@rpo-mng.ru)"),
+        "HH-User-Agent": os.getenv("HH_USER_AGENT", "RPOVacancyMonitor/2.0 (rpo@rpo-mng.ru)"),
         "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
     url = "https://api.hh.ru" + endpoint
     if params:
         url += "?" + urlencode(params)
