@@ -259,28 +259,54 @@ def fetch_current_vacancies() -> dict[str, dict]:
 
 
 def scan_once() -> tuple[str, int, str]:
-    """Refresh each source independently. A failed source keeps its previous data."""
+    """Check enabled sources only; preserve the last good data on source errors."""
     from .vacancy_sources import collect_sources
+
     init_tables()
     with SessionLocal() as db:
+        enabled = set(enabled_source_names(db))
         scan = VacancyScan(started_at=now_utc())
         db.add(scan)
         db.commit()
         scan_id = scan.id
-    collected = {}
-    errors = {}
-    try:
-        collected["hh.ru"] = fetch_current_vacancies()
-    except Exception as exc:
-        errors["hh.ru"] = str(exc)[:180]
-        log.warning("HeadHunter scan failed: %s", exc)
-    more, source_errors = collect_sources()
+
+    collected: dict[str, dict] = {}
+    errors: dict[str, str] = {}
+    if "hh.ru" in enabled:
+        try:
+            collected["hh.ru"] = fetch_current_vacancies()
+        except Exception as exc:
+            errors["hh.ru"] = str(exc)[:400]
+            log.warning("HeadHunter scan failed: %s", exc)
+    more, source_errors = collect_sources(enabled)
     collected.update(more)
     errors.update(source_errors)
+
     stamp = now_utc()
     total = 0
     with SessionLocal() as db:
-        for source, rows in collected.items():
+        for source in SOURCES_FILTER:
+            previous_status = db.get(VacancySourceStatus, source)
+            if previous_status is None:
+                previous_status = VacancySourceStatus(source=source)
+                db.add(previous_status)
+            if source not in enabled:
+                previous_status.state = "excluded"
+                previous_status.error = ""
+                previous_status.found = 0
+                previous_status.checked_at = stamp
+                continue
+            if source in errors:
+                previous_status.state = "error"
+                previous_status.error = errors[source]
+                previous_status.checked_at = stamp
+                # Retain the last successfully collected vacancy count.
+                continue
+            rows = collected.get(source, {})
+            previous_status.state = "ok"
+            previous_status.found = len(rows)
+            previous_status.error = ""
+            previous_status.checked_at = stamp
             existing = {
                 v.source_id: v for v in db.scalars(
                     select(TrackedVacancy).where(TrackedVacancy.source == source)
@@ -299,13 +325,26 @@ def scan_once() -> tuple[str, int, str]:
                 if ident not in rows:
                     vacancy.active = False
             total += len(rows)
+
         scan = db.get(VacancyScan, scan_id)
-        scan.status = "partial" if collected and errors else ("ok" if collected else "error")
+        if not enabled:
+            scan.status = "excluded"
+            scan.message = "Все источники исключены пользователем"
+        elif errors and collected:
+            scan.status = "partial"
+            scan.message = "; ".join(
+                f"{name}: {reason}" for name, reason in sorted(errors.items())
+            )[:3500]
+        elif errors:
+            scan.status = "error"
+            scan.message = "; ".join(
+                f"{name}: {reason}" for name, reason in sorted(errors.items())
+            )[:3500]
+        else:
+            scan.status = "ok"
+            scan.message = ""
         scan.found = total
         scan.finished_at = stamp
-        scan.message = "; ".join(
-            f"{name}: {reason}" for name, reason in sorted(errors.items())
-        )[:3500]
         db.commit()
     return scan.status, total, scan.message
 
