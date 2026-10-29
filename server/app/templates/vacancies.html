@@ -266,7 +266,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
       </div>
       <p class="company">{{ item.employer }}</p>
       <div class="meta">
-        <span>Опубликовано {{ ru_date(item.published_at) }}</span>
+        {% if item.source == "hh.ru" %}<span>Опубликовано {{ ru_date(item.published_at) }}</span>{% else %}<span>Впервые обнаружено {{ ru_date(item.first_seen_at) }} · дата публикации не указана</span>{% endif %}
         {% if item.schedule %}<span>{{ item.schedule }}</span>{% endif %}
         <span>Источник: {{ item.source }}</span>
       </div>
