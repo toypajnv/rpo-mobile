@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import hashlib
 import secrets
 from types import SimpleNamespace
 from typing import Annotated
@@ -16,7 +17,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, Depends, Query, Request, Form, HTTPException
@@ -345,7 +346,7 @@ def scan_once() -> tuple[str, int, str]:
                     vacancy.active = True
                     vacancy.last_seen_at = stamp
             for ident, vacancy in existing.items():
-                if ident not in rows:
+                if ident not in rows and not ident.startswith("manual-"):
                     vacancy.active = False
             total += len(rows)
 
@@ -433,6 +434,53 @@ def update_vacancy_sources(
         setting.updated_at = now_utc()
     db.commit()
     return RedirectResponse("/vacancies?sources=updated", status_code=303)
+
+@router.post("/vacancies/add-avito", include_in_schema=False)
+def save_avito_link(
+    request: Request,
+    url: Annotated[str, Form(max_length=500)],
+    title: Annotated[str, Form(max_length=500)],
+    employer: Annotated[str, Form(max_length=255)],
+    city: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+    db: Session = Depends(get_db),
+):
+    """Admin may save a personally opened Avito vacancy when public scanning is blocked."""
+    from .vacancy_auth import vacancy_logged_in
+    if not vacancy_logged_in(request):
+        return RedirectResponse("/vacancies/login", status_code=303)
+    expected = request.session.get("vacancies_source_csrf", "")
+    if not expected or not hmac.compare_digest(expected, csrf_token):
+        raise HTTPException(status_code=403, detail="Неверный токен формы")
+    parsed = urlparse(url.strip())
+    location = {"Тюмень": "tyumen", "Нижневартовск": "nizhnevartovsk"}.get(city)
+    if (parsed.scheme != "https" or parsed.hostname not in ("avito.ru", "www.avito.ru")
+            or not location or not parsed.path.startswith(f"/{location}/vakansii/")
+            or not re.search(r"\d{6,}", parsed.path)):
+        raise HTTPException(status_code=422, detail="Укажите ссылку на отдельную вакансию Авито в выбранном городе")
+    title, employer = title.strip(), employer.strip()
+    if not (6 <= len(title) <= 500 and 2 <= len(employer) <= 255):
+        raise HTTPException(status_code=422, detail="Проверьте название вакансии и работодателя")
+    canonical = "https://www.avito.ru" + parsed.path.rstrip("/")
+    ident = "manual-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:40]
+    row = db.scalar(select(TrackedVacancy).where(
+        TrackedVacancy.source == "avito.ru", TrackedVacancy.source_id == ident
+    ))
+    if row is None:
+        row = TrackedVacancy(source="avito.ru", source_id=ident, first_seen_at=now_utc())
+        db.add(row)
+    row.brand = company_brand(employer) or "Другие компании"
+    row.employer = employer
+    row.title = title
+    row.city = city
+    row.url = canonical
+    row.salary = ""
+    row.schedule = ""
+    row.published_at = now_utc()
+    row.last_seen_at = now_utc()
+    row.active = True
+    db.commit()
+    return RedirectResponse("/vacancies?avito=added", status_code=303)
 
 @router.get("/vacancies", response_class=HTMLResponse, include_in_schema=False)
 def vacancy_page(
