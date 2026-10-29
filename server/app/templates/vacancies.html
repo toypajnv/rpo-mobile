@@ -38,7 +38,7 @@ h1{font-size:clamp(26px,3.2vw,36px);letter-spacing:-.035em;margin:0 0 8px}
 .filters{padding:20px 21px;margin-bottom:22px}
 .filter-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 15px}
 .filter-head b{font-size:16px}
-.filters-grid{display:grid;grid-template-columns:1.2fr 1.2fr 1.6fr auto;gap:12px;align-items:end}
+.filters-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1.6fr auto;gap:12px;align-items:end}
 label{font-size:12px;color:#52677c;font-weight:650;display:grid;gap:7px}
 select,input[type=search]{height:43px;width:100%;padding:0 13px;background:#fcfdfe;border:1px solid #d8e0e9;border-radius:10px;font:inherit;font-size:13px;color:#193850}
 select:focus,input:focus{outline:2px solid #afd5fa;outline-offset:1px}
@@ -78,7 +78,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
 .metrics{grid-template-columns:1fr 1fr;gap:9px}.metrics .metric:last-child{grid-column:span 2}.metric{padding:15px}
 .metric strong{font-size:25px}.filters{padding:15px}
 .filters-grid{grid-template-columns:1fr 1fr}
-.filters-grid label:nth-child(3){grid-column:span 2}
+.filters-grid label:nth-child(4){grid-column:span 2}
 .filters-grid .primary{grid-column:span 2}
 .row{flex-direction:column}.salary{order:2}
 .vacancy{padding:17px}.vacancy h3{font-size:16px}
@@ -94,8 +94,8 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
     </div>
     <div class="header-actions">
       <span class="muted small user">{{ operator.username }}</span>
-      <a class="small" href="/dashboard">Панель РПО</a>
-      <form action="/logout" method="post"><button class="linklike small" type="submit">Выйти</button></form>
+      
+      <form action="/vacancies/logout" method="post"><button class="linklike small" type="submit">Выйти</button></form>
     </div>
   </div>
 </header>
@@ -107,8 +107,8 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
     </div>
     {% if scan and scan.status == 'ok' %}
       <span class="status"><i class="dot"></i> Проверено {{ ru_date(scan.finished_at) }}</span>
-    {% elif scan and scan.status == 'error' %}
-      <span class="status error"><i class="dot"></i> Ошибка источника</span>
+    {% elif scan and scan.status in ('error', 'partial') %}
+      <span class="status error"><i class="dot"></i> {{ "Частично обновлено" if scan.status == "partial" else "Ошибки источников" }} · {{ ru_date(scan.finished_at) }}</span>
     {% else %}
       <span class="status pending"><i class="dot"></i> Ожидается первая проверка</span>
     {% endif %}
@@ -120,8 +120,8 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
     <div class="metric"><div class="kicker">Периодичность</div><strong>60 <span style="font-size:16px">мин</span></strong><div class="foot">Автоматическая проверка</div></div>
   </div>
 
-  {% if scan and scan.status == 'error' %}
-  <div class="notice"><b>Не удалось обновить вакансии.</b> Последние успешно найденные данные сохранены.<br>
+  {% if scan and scan.status in ('error', 'partial') %}
+  <div class="notice"><b>Некоторые источники недоступны.</b> Данные успешных источников обновлены, а остальные сохранены без изменений.<br>
     {{ scan.message }}<br>
     {% if 'TOKEN' in scan.message or '403' in scan.message or '401' in scan.message %}
       Для доступа к API зарегистрируйте приложение на <a href="https://dev.hh.ru/" target="_blank" rel="noopener noreferrer">dev.hh.ru</a> и задайте OAuth-токен <code>HH_API_TOKEN</code> в настройках сервера.
@@ -132,7 +132,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
   {% endif %}
 
   <form class="filters" method="get" action="/vacancies">
-    <div class="filter-head"><b>Фильтры</b><span class="muted small">Данные: HeadHunter</span></div>
+    <div class="filter-head"><b>Фильтры</b><span class="muted small">HeadHunter · официальные сайты · Авито</span></div>
     <div class="filters-grid">
       <label>Компания
         <select name="brand" onchange="this.form.submit()">
@@ -144,6 +144,12 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
         <select name="city" onchange="this.form.submit()">
           <option value="">Оба города</option>
           {% for item in cities %}<option value="{{ item }}" {% if city == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Источник
+        <select name="source" onchange="this.form.submit()">
+          <option value="">Все источники</option>
+          {% for item in sources %}<option value="{{ item }}" {% if source == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
         </select>
       </label>
       <label>Поиск по должности или работодателю
@@ -179,7 +185,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
       <div class="meta">
         <span>Опубликовано {{ ru_date(item.published_at) }}</span>
         {% if item.schedule %}<span>{{ item.schedule }}</span>{% endif %}
-        <span>Источник: hh.ru</span>
+        <span>Источник: {{ item.source }}</span>
       </div>
       <a class="goto" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Открыть оригинал вакансии ↗</a>
     </article>
@@ -204,7 +210,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
   {% endif %}
   <p class="footer">
     Вакансии сохраняются в отдельные таблицы и не связаны с данными нарядов-допусков.
-    Время указано по Тюмени (UTC+5). Публикации на корпоративных сайтах, отсутствующие на HeadHunter, могут не отображаться.
+    Время указано по Тюмени (UTC+5). Мониторинг официальных сайтов и публичных страниц Авито работает только при технической доступности источника и разрешении автоматического просмотра.
     Вакансия может быть закрыта работодателем между проверками.
   </p>
 </main>
