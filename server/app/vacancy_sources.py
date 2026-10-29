@@ -131,7 +131,7 @@ def _listing_rows(html: str, page: str, source: Source) -> list[dict]:
     offers = []
     for anchor in soup.find_all("a", href=True):
         title = anchor.get_text(" ", strip=True)
-        if len(title) < 8 or len(title) > 220 or not _job(title):
+        if len(title) < 8 or len(title) > 220:
             continue
         url = safe_url(page, anchor["href"], source.allowed_host)
         if not url or not URL_HREF.search(urlparse(url).path):
@@ -182,7 +182,7 @@ def _novatek_rows(html: str, page: str) -> list[dict]:
         if len(lines) < 2:
             continue
         for index, line in enumerate(lines[1:20], 1):
-            if _job(line) and len(line) < 180 and not line.startswith(("Требования", "Обязанности")):
+            if len(line) >= 8 and len(line) < 180 and not line.startswith(("Требования", "Обязанности", "Контакты")):
                 identifier = slug_id(page + city + line)
                 offers.append({
                     "source": "novatek.ru", "source_id": identifier, "brand": "НОВАТЭК",
@@ -211,7 +211,7 @@ def _avito_rows(html: str, page: str, city: str) -> list[dict]:
         if a is None:
             continue
         title = a.get_text(" ", strip=True)
-        if not _job(title):
+        if len(title) < 6:
             continue
         href = safe_url(page, a.get("href", ""), "www.avito.ru")
         if not href or not AVITO_ITEM.search(urlparse(href).path):
@@ -222,12 +222,10 @@ def _avito_rows(html: str, page: str, city: str) -> list[dict]:
         # Unlike named company career portals, Avito ads are independently
         # authored. Only an explicitly attributable company is accepted.
         from .vacancies import company_brand
-        brand = company_brand(card_text)
-        if not brand:
-            continue
+        brand = company_brand(card_text) or "Другие компании"
         rows[slug_id(href)] = {
             "source": AVITO_SOURCE, "source_id": slug_id(href), "brand": brand,
-            "employer": "На Авито указано: " + brand + " (не подтверждено)", "title": title[:500], "city": city, "url": href,
+            "employer": "Работодатель по объявлению (не проверен)" if brand == "Другие компании" else "На Авито указано: " + brand + " (не подтверждено)", "title": title[:500], "city": city, "url": href,
             "salary": "", "schedule": "", "published_at": datetime.now(timezone.utc),
         }
     return list(rows.values())

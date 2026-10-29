@@ -38,7 +38,8 @@ h1{font-size:clamp(26px,3.2vw,36px);letter-spacing:-.035em;margin:0 0 8px}
 .filters{padding:20px 21px;margin-bottom:22px}
 .filter-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 15px}
 .filter-head b{font-size:16px}
-.filters-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1.6fr auto;gap:12px;align-items:end}
+.filters-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end}
+.filters-grid .query{grid-column:span 2}.filters-grid button.primary{align-self:end}
 label{font-size:12px;color:#52677c;font-weight:650;display:grid;gap:7px}
 select,input[type=search]{height:43px;width:100%;padding:0 13px;background:#fcfdfe;border:1px solid #d8e0e9;border-radius:10px;font:inherit;font-size:13px;color:#193850}
 select:focus,input:focus{outline:2px solid #afd5fa;outline-offset:1px}
@@ -78,7 +79,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
 .metrics{grid-template-columns:1fr 1fr;gap:9px}.metrics .metric:last-child{grid-column:span 2}.metric{padding:15px}
 .metric strong{font-size:25px}.filters{padding:15px}
 .filters-grid{grid-template-columns:1fr 1fr}
-.filters-grid label:nth-child(4){grid-column:span 2}
+.filters-grid .query{grid-column:span 2}
 .filters-grid .primary{grid-column:span 2}
 .row{flex-direction:column}.salary{order:2}
 .vacancy{padding:17px}.vacancy h3{font-size:16px}
@@ -98,6 +99,16 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
 .source-actions span{font-size:12px;color:#678095}
 .source-hint{font-size:12px;color:#476b50;background:#eaf6ee;padding:10px 13px;border-radius:10px;margin-bottom:15px}
 @media(max-width:740px){.source-list{grid-template-columns:1fr}.sources-settings{padding:15px}}
+.fallback-sources,.manual-entry{background:#fff;border:1px solid #e4eaf0;border-radius:17px;padding:19px 21px;margin-bottom:19px}
+.fallback-sources h2,.manual-entry h2{font-size:17px;margin:0 0 6px}
+.fallback-sources p,.manual-entry p{font-size:12px;line-height:1.6;color:#6c7f90;margin:0 0 14px}
+.fallback-links{display:flex;gap:8px;flex-wrap:wrap}
+.fallback-links a{font-weight:700;font-size:12px;text-decoration:none;padding:9px 12px;border:1px solid #d9e6f2;border-radius:9px;background:#f2f7fc}
+.manual-grid{display:grid;grid-template-columns:2fr 1.5fr 1.2fr 1fr auto;gap:10px;align-items:end}
+.manual-grid label{min-width:0}
+.manual-grid input{height:43px;width:100%;box-sizing:border-box;border:1px solid #d8e0e9;border-radius:10px;padding:0 12px;font:inherit;font-size:12px}
+@media(max-width:1000px){.manual-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-grid label:first-child{grid-column:span 2}}
+@media(max-width:740px){.filters-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.filters-grid .query{grid-column:span 2}.manual-grid{grid-template-columns:1fr}.manual-grid label:first-child{grid-column:span 1}}
 </style>
 </head>
 <body>
@@ -118,7 +129,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
   <div class="intro">
     <div>
       <h1>Вакансии по безопасности</h1>
-      <p class="sub">СИБУР · Транснефть · НОВАТЭК · Газпром · Роснефть<br>Нижневартовск и Тюмень · Проверка каждый час</p>
+      <p class="sub">Все работодатели · Все профессии · Фильтр по производственной безопасности<br>Нижневартовск и Тюмень · Проверка каждый час</p>
     </div>
     {% if scan and scan.status == 'ok' %}
       <span class="status"><i class="dot"></i> Проверено {{ ru_date(scan.finished_at) }}</span>
@@ -130,16 +141,16 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
   </div>
 
   <div class="metrics">
-    <div class="metric"><div class="kicker">Актуальных вакансий</div><strong>{{ active_count }}</strong><div class="foot">По пяти группам компаний</div></div>
+    <div class="metric"><div class="kicker">Актуальных вакансий</div><strong>{{ active_count }}</strong><div class="foot">Все работодатели в двух городах</div></div>
     <div class="metric"><div class="kicker">Новых за 24 часа</div><strong>{{ new_count }}</strong><div class="foot">Впервые найдены мониторингом</div></div>
     <div class="metric"><div class="kicker">Периодичность</div><strong>60 <span style="font-size:16px">мин</span></strong><div class="foot">Автоматическая проверка</div></div>
   </div>
 
   {% if scan and scan.status in ('error', 'partial') %}
-  <div class="notice"><b>Некоторые источники недоступны.</b> Данные успешных источников обновлены, а остальные сохранены без изменений.<br>
+  <div class="notice"><b>Некоторые источники недоступны.</b> Успешные источники обновлены. Данные недоступных источников сохранены без изменений.<br>
     {{ scan.message }}<br>
     {% if 'TOKEN' in scan.message or '403' in scan.message or '401' in scan.message %}
-      Для доступа к API зарегистрируйте приложение на <a href="https://dev.hh.ru/" target="_blank" rel="noopener noreferrer">dev.hh.ru</a> и задайте OAuth-токен <code>HH_API_TOKEN</code> в настройках сервера.
+      Для поиска HH зарегистрируйте приложение на <a href="https://dev.hh.ru/" target="_blank" rel="noopener noreferrer">dev.hh.ru</a> и настройте <code>HH_CLIENT_ID</code> и <code>HH_CLIENT_SECRET</code> (либо действующий <code>HH_API_TOKEN</code>).
     {% endif %}
   </div>
   {% elif not scan %}
@@ -175,6 +186,11 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
 <form class="filters" method="get" action="/vacancies">
     <div class="filter-head"><b>Фильтры</b><span class="muted small">HeadHunter · официальные сайты · Авито</span></div>
     <div class="filters-grid">
+      <label>Специальность
+        <select name="specialty" onchange="this.form.submit()">
+          {% for key, label in specialties.items() %}<option value="{{ key }}" {% if specialty == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
       <label>Компания
         <select name="brand" onchange="this.form.submit()">
           <option value="">Все компании</option>
@@ -193,7 +209,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
           {% for item in sources %}<option value="{{ item }}" {% if source == item %}selected{% endif %}>{{ item }}</option>{% endfor %}
         </select>
       </label>
-      <label>Поиск по должности или работодателю
+      <label class="query">Поиск по должности или работодателю
         <input type="search" name="q" value="{{ q }}" placeholder="Например, ведущий специалист">
       </label>
       <button class="primary" type="submit">Найти</button>
@@ -204,6 +220,31 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
     </div>
   </form>
 
+  <section class="fallback-sources">
+    <div>
+      <h2>Поиск напрямую на площадках</h2>
+      <p>Если автоматический источник заблокирован, поиск открывается в обычном браузере. Сохраните подходящую вакансию Авито ниже.</p>
+    </div>
+    <div class="fallback-links">
+      <a href="https://www.avito.ru/tyumen/vakansii" target="_blank" rel="noopener noreferrer">Авито · Тюмень ↗</a>
+      <a href="https://www.avito.ru/nizhnevartovsk/vakansii" target="_blank" rel="noopener noreferrer">Авито · Нижневартовск ↗</a>
+      <a href="https://tyumen.hh.ru/vacancies" target="_blank" rel="noopener noreferrer">HH · Тюмень ↗</a>
+      <a href="https://nizhnevartovsk.hh.ru/vacancies" target="_blank" rel="noopener noreferrer">HH · Нижневартовск ↗</a>
+    </div>
+  </section>
+  {% if request.query_params.get("avito") == "added" %}<div class="source-hint">Вакансия Авито сохранена в мониторинге.</div>{% endif %}
+  <form class="manual-entry" action="/vacancies/add-avito" method="post">
+    <input type="hidden" name="csrf_token" value="{{ source_csrf }}">
+    <h2>Сохранить вакансию Авито по ссылке</h2>
+    <p>Резервный способ при HTTP 439: откройте вакансию в обычном браузере и внесите её данные. Ссылка появится в общем списке.</p>
+    <div class="manual-grid">
+      <label>Ссылка на вакансию<input type="url" name="url" maxlength="500" required placeholder="https://www.avito.ru/tyumen/vakansii/..."></label>
+      <label>Должность<input name="title" minlength="6" maxlength="500" required placeholder="Специалист по охране труда"></label>
+      <label>Работодатель<input name="employer" minlength="2" maxlength="255" required placeholder="Название компании"></label>
+      <label>Город<select name="city" required><option value="Тюмень">Тюмень</option><option value="Нижневартовск">Нижневартовск</option></select></label>
+      <button class="primary" type="submit">Сохранить вакансию</button>
+    </div>
+  </form>
   <div class="list-top">
     <h2>Найденные вакансии</h2>
     <span>Показано {{ vacancies|length }} из {{ total }}</span>
@@ -217,7 +258,8 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
           <div class="badges">
             <span class="tag">{{ item.brand }}</span>
             <span class="tag">{{ item.city }}</span>
-            {% if item.first_seen_at >= new_since %}<span class="tag new">Новая</span>{% endif %}
+            <span class="tag">{{ specialties.get(classify_specialty(item.title), "Другое") }}</span>
+            {% if is_fresh(item.first_seen_at) %}<span class="tag new">Новая</span>{% endif %}
           </div>
         </div>
         {% if item.salary %}<div class="salary">{{ item.salary }}</div>{% endif %}
@@ -234,7 +276,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
     <div class="empty">
       <b>Нет вакансий из доступных и выбранных источников</b>
       {% if scan and scan.status == 'ok' %}
-      Если все включённые источники проверены успешно, подходящих объявлений по фильтрам пока нет.
+      Если все включённые источники проверены успешно, объявления по выбранным фильтрам пока не найдены.
       {% else %}
       Часть сайтов не удалось проверить. Посмотрите статус каждого источника выше.
       {% endif %}

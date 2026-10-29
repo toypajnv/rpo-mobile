@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import hashlib
 import secrets
 from types import SimpleNamespace
 from typing import Annotated
@@ -16,7 +17,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, Depends, Query, Request, Form, HTTPException
@@ -26,6 +27,8 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .database import Base, SessionLocal, engine, get_db
 from .security import verify_password
+from .vacancy_specialties import SPECIALTIES, classify_specialty, specialty_condition
+from .vacancy_hh_oauth import get_access_token
 
 log = logging.getLogger("vacancies")
 router = APIRouter()
@@ -36,7 +39,7 @@ AUTH_ATTEMPTS: dict[str, tuple[int, float]] = {}
 SOURCES_FILTER = ("hh.ru", "career.sibur.ru", "siberia.transneft.ru", "novatek.ru",
                   "gazpromvacancy.ru", "rosneft.ru", "avito.ru")
 CITY_NAMES = ("Тюмень", "Нижневартовск")
-BRANDS = ("СИБУР", "Транснефть", "НОВАТЭК", "Газпром", "Роснефть")
+BRANDS = ("СИБУР", "Транснефть", "НОВАТЭК", "Газпром", "Роснефть", "Другие компании")
 BRAND_ALIASES = {
     "СИБУР": ("сибур", "запсибнефтехим", "сибуртобольск", "южно-балыкский гпз"),
     "Транснефть": ("транснефть",),
@@ -170,13 +173,12 @@ def salary_text(value: dict | None) -> str:
 
 def hh_json(endpoint: str, params: dict | None = None) -> dict | list:
     """Use registered hh.ru API; never bypass captcha or robots protection."""
-    token = os.getenv("HH_API_TOKEN", "").strip()
+    token = get_access_token()
     headers = {
-        "User-Agent": os.getenv("HH_USER_AGENT", "RPOVacancies/1.0 (rpo@rpo-mng.ru)"),
+        "HH-User-Agent": os.getenv("HH_USER_AGENT", "RPOVacancyMonitor/2.0 (rpo@rpo-mng.ru)"),
         "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
     url = "https://api.hh.ru" + endpoint
     if params:
         url += "?" + urlencode(params)
@@ -214,8 +216,9 @@ def parse_vacancy(item: dict, city: str) -> dict | None:
     employer = str((item.get("employer") or {}).get("name", "")).strip()
     brand = company_brand(employer)
     identifier = str(item.get("id", ""))
-    if not (brand and relevant_title(title) and identifier.isdigit()):
+    if not (title and identifier.isdigit()):
         return None
+    brand = brand or "Другие компании"
     schedule = (item.get("schedule") or {}).get("name", "")
     return {
         "source": "hh.ru",
@@ -232,32 +235,52 @@ def parse_vacancy(item: dict, city: str) -> dict | None:
 
 
 def fetch_current_vacancies() -> dict[str, dict]:
-    ids = area_ids()
-    found = {}
-    for city, area_id in ids.items():
-        for term in SEARCH_TERMS:
-            for page in range(3):
-                response = hh_json("/vacancies", {
-                    "area": area_id,
-                    "text": term,
-                    "search_field": "name",
-                    "per_page": 100,
-                    "page": page,
-                    "order_by": "publication_time",
-                })
-                for item in response.get("items", []):
-                    vacancy = parse_vacancy(item, city)
-                    if vacancy:
-                        found[vacancy["source_id"]] = vacancy
-                # Incomplete scans must not mark omitted vacancies as archived.
-                if page + 1 >= int(response.get("pages", 0)):
-                    break
-                if page == 2:
-                    raise RuntimeError(f"Неполная выдача HH: {city}, запрос «{term}»")
-                time.sleep(0.25)
-            time.sleep(0.25)
-    return found
+    """Fetch every published HH job in two cities within the last 30 days.
 
+    HH caps one search at 2,000 records. Split the publication-date window
+    whenever its size exceeds that limit. If the window cannot be exhausted,
+    fail the source rather than inaccurately archiving unseen vacancies.
+    """
+    ids = area_ids()
+    found: dict[str, dict] = {}
+    end = now_utc()
+    start = end - timedelta(days=30)
+
+    def read_window(city: str, area_id: str, first: datetime, last: datetime, depth: int = 0):
+        params = {
+            "area": area_id,
+            "per_page": 100,
+            "page": 0,
+            "order_by": "publication_time",
+            "date_from": first.isoformat(timespec="seconds"),
+            "date_to": last.isoformat(timespec="seconds"),
+        }
+        response = hh_json("/vacancies", params)
+        pages = int(response.get("pages", 0))
+        count = int(response.get("found", 0))
+        if count > 2000 or pages > 20:
+            if (last - first) <= timedelta(minutes=10) or depth >= 22:
+                raise RuntimeError(f"HeadHunter: выдача {city} превышает лимит 2000 даже в минимальном интервале")
+            mid = first + (last - first) / 2
+            read_window(city, area_id, first, mid, depth + 1)
+            read_window(city, area_id, mid, last, depth + 1)
+            return
+        for item in response.get("items", []):
+            vacancy = parse_vacancy(item, city)
+            if vacancy:
+                found[vacancy["source_id"]] = vacancy
+        for page in range(1, pages):
+            params["page"] = page
+            more = hh_json("/vacancies", params)
+            for item in more.get("items", []):
+                vacancy = parse_vacancy(item, city)
+                if vacancy:
+                    found[vacancy["source_id"]] = vacancy
+            time.sleep(0.12)
+
+    for city, area_id in ids.items():
+        read_window(city, area_id, start, end)
+    return found
 
 def scan_once() -> tuple[str, int, str]:
     """Check enabled sources only; preserve the last good data on source errors."""
@@ -323,7 +346,7 @@ def scan_once() -> tuple[str, int, str]:
                     vacancy.active = True
                     vacancy.last_seen_at = stamp
             for ident, vacancy in existing.items():
-                if ident not in rows:
+                if ident not in rows and not ident.startswith("manual-"):
                     vacancy.active = False
             total += len(rows)
 
@@ -349,6 +372,13 @@ def scan_once() -> tuple[str, int, str]:
         db.commit()
     return scan.status, total, scan.message
 
+def is_fresh(value: datetime | None) -> bool:
+    if not value:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value >= now_utc() - timedelta(hours=24)
+
 def ru_date(value: datetime | None) -> str:
     if not value:
         return "—"
@@ -357,12 +387,15 @@ def ru_date(value: datetime | None) -> str:
     return value.astimezone(RU_TIME).strftime("%d.%m.%Y %H:%M")
 
 
-def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = ""):
+def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = "", specialty: str = ""):
     query = select(TrackedVacancy).where(
         TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
     )
     if brand in BRANDS:
         query = query.where(TrackedVacancy.brand == brand)
+    specialty_filter = specialty_condition(TrackedVacancy.title, specialty)
+    if specialty_filter is not None:
+        query = query.where(specialty_filter)
     if source in SOURCES_FILTER:
         query = query.where(TrackedVacancy.source == source)
     if city in CITY_NAMES:
@@ -409,6 +442,53 @@ def update_vacancy_sources(
     db.commit()
     return RedirectResponse("/vacancies?sources=updated", status_code=303)
 
+@router.post("/vacancies/add-avito", include_in_schema=False)
+def save_avito_link(
+    request: Request,
+    url: Annotated[str, Form(max_length=500)],
+    title: Annotated[str, Form(max_length=500)],
+    employer: Annotated[str, Form(max_length=255)],
+    city: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()],
+    db: Session = Depends(get_db),
+):
+    """Admin may save a personally opened Avito vacancy when public scanning is blocked."""
+    from .vacancy_auth import vacancy_logged_in
+    if not vacancy_logged_in(request):
+        return RedirectResponse("/vacancies/login", status_code=303)
+    expected = request.session.get("vacancies_source_csrf", "")
+    if not expected or not hmac.compare_digest(expected, csrf_token):
+        raise HTTPException(status_code=403, detail="Неверный токен формы")
+    parsed = urlparse(url.strip())
+    location = {"Тюмень": "tyumen", "Нижневартовск": "nizhnevartovsk"}.get(city)
+    if (parsed.scheme != "https" or parsed.hostname not in ("avito.ru", "www.avito.ru")
+            or not location or not parsed.path.startswith(f"/{location}/vakansii/")
+            or not re.search(r"\d{6,}", parsed.path)):
+        raise HTTPException(status_code=422, detail="Укажите ссылку на отдельную вакансию Авито в выбранном городе")
+    title, employer = title.strip(), employer.strip()
+    if not (6 <= len(title) <= 500 and 2 <= len(employer) <= 255):
+        raise HTTPException(status_code=422, detail="Проверьте название вакансии и работодателя")
+    canonical = "https://www.avito.ru" + parsed.path.rstrip("/")
+    ident = "manual-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:40]
+    row = db.scalar(select(TrackedVacancy).where(
+        TrackedVacancy.source == "avito.ru", TrackedVacancy.source_id == ident
+    ))
+    if row is None:
+        row = TrackedVacancy(source="avito.ru", source_id=ident, first_seen_at=now_utc())
+        db.add(row)
+    row.brand = company_brand(employer) or "Другие компании"
+    row.employer = employer
+    row.title = title
+    row.city = city
+    row.url = canonical
+    row.salary = ""
+    row.schedule = ""
+    row.published_at = now_utc()
+    row.last_seen_at = now_utc()
+    row.active = True
+    db.commit()
+    return RedirectResponse("/vacancies?avito=added", status_code=303)
+
 @router.get("/vacancies", response_class=HTMLResponse, include_in_schema=False)
 def vacancy_page(
     request: Request,
@@ -418,6 +498,7 @@ def vacancy_page(
     new: bool = Query(default=False),
     page: int = Query(default=1, ge=1, le=1000),
     source: str = Query(default="", max_length=30),
+    specialty: str = Query(default="", max_length=40),
     db: Session = Depends(get_db),
 ):
     from .vacancy_auth import vacancy_logged_in
@@ -427,7 +508,7 @@ def vacancy_page(
         request.session["vacancies_source_csrf"] = secrets.token_urlsafe(24)
     operator = SimpleNamespace(username="admin")
     disabled_sources = disabled_source_names(db)
-    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source)
+    vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source, specialty)
     last_scan = db.scalar(select(VacancyScan).order_by(VacancyScan.id.desc()).limit(1))
     active_count = db.scalar(
         select(func.count()).select_from(TrackedVacancy).where(
@@ -449,6 +530,8 @@ def vacancy_page(
             "operator": operator, "vacancies": vacancies, "total": total,
             "active_count": active_count, "new_count": new_count, "scan": last_scan,
             "brands": BRANDS, "cities": CITY_NAMES,
+            "specialties": SPECIALTIES, "specialty": specialty,
+            "classify_specialty": classify_specialty, "is_fresh": is_fresh,
             "sources": SOURCES_FILTER, "source": source,
             "disabled_sources": disabled_sources, "source_statuses": statuses,
             "source_csrf": request.session["vacancies_source_csrf"],

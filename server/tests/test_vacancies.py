@@ -73,13 +73,49 @@ class TestVacancyFilters(unittest.TestCase):
                 return io.BytesIO(b'{"items":[],"pages":0}')
             def __exit__(self, *_):
                 pass
-        with patch("app.vacancies.urlopen", return_value=FakeResponse()) as open_mock:
+        with patch("app.vacancies.get_access_token", return_value="unit-test-token"), \
+             patch("app.vacancies.urlopen", return_value=FakeResponse()) as open_mock:
             result = vacancies.hh_json("/vacancies", {"text": "охрана труда"})
         self.assertEqual(result["items"], [])
         request = open_mock.call_args.args[0]
         self.assertIsInstance(request, UrlRequest)
         self.assertIn("охрана", unquote(request.full_url))
         self.assertEqual(request.get_header("Accept"), "application/json")
+    def test_all_professions_and_other_employers_are_kept(self):
+        entry = {
+            "id": "9200012345", "name": "Водитель автобуса",
+            "employer": {"name": "ООО Городской транспорт"},
+            "area": {"name": "Тюмень"}, "published_at": "2026-10-29T09:30:00+0500",
+        }
+        found = vacancies.parse_vacancy(entry, "Тюмень")
+        self.assertIsNotNone(found)
+        self.assertEqual(found["brand"], "Другие компании")
+        self.assertEqual(found["title"], "Водитель автобуса")
+
+    def test_specialty_query_matches_only_requested_direction(self):
+        from app.vacancy_specialties import specialty_condition
+        from sqlalchemy import select as select_sql
+        engine = create_engine("sqlite://")
+        vacancies.TrackedVacancy.__table__.create(engine)
+        vacancies.VacancySourceSetting.__table__.create(engine)
+        stamp = datetime.now(timezone.utc)
+        with Session(engine) as db:
+            for idx, title in enumerate(("Специалист по охране труда", "Водитель автобуса"), 1):
+                db.add(vacancies.TrackedVacancy(
+                    source="hh.ru", source_id=str(idx), brand="Другие компании",
+                    employer="ООО Компания", title=title, city="Тюмень",
+                    url=f"https://hh.ru/vacancy/{idx}", published_at=stamp,
+                    first_seen_at=stamp, last_seen_at=stamp, active=True,
+                ))
+            db.commit()
+            all_rows, total = vacancies.query_vacancies(db, specialty="")
+            self.assertEqual(total, 2)
+            safety_rows, total = vacancies.query_vacancies(db, specialty="safety")
+            self.assertEqual(total, 1)
+            self.assertIn("охране труда", safety_rows[0].title)
+            rest, total = vacancies.query_vacancies(db, specialty="other")
+            self.assertEqual(total, 1)
+            self.assertIn("Водитель", rest[0].title)
     def test_source_errors_never_bypass_captcha(self):
         with patch.object(vacancies, "hh_json", side_effect=RuntimeError("HTTP 403")):
             with self.assertRaisesRegex(RuntimeError, "403"):
@@ -159,6 +195,24 @@ class TestVacancyFilters(unittest.TestCase):
                 with vacancies.SessionLocal() as db:
                     self.assertEqual(vacancies.disabled_source_names(db), set())
                 self.assertIn(client.get("/dashboard", follow_redirects=False).status_code, (303, 401))
+                added = client.post("/vacancies/add-avito", data={
+                    "csrf_token": csrf.group(1),
+                    "url": "https://www.avito.ru/tyumen/vakansii/inzhener_po_ohrane_truda_9234567890?utm=test",
+                    "title": "Инженер по охране труда",
+                    "employer": "ООО Тестовый работодатель",
+                    "city": "Тюмень",
+                }, follow_redirects=False)
+                self.assertEqual(added.status_code, 303, added.text)
+                page = client.get("/vacancies", params={"specialty": "labor"})
+                self.assertIn("Инженер по охране труда", page.text)
+                invalid = client.post("/vacancies/add-avito", data={
+                    "csrf_token": csrf.group(1),
+                    "url": "https://example.com/tyumen/vakansii/fake_9234567890",
+                    "title": "Инженер по охране труда",
+                    "employer": "Подставная компания",
+                    "city": "Тюмень",
+                }, follow_redirects=False)
+                self.assertEqual(invalid.status_code, 422)
                 left = client.post("/vacancies/logout", follow_redirects=False)
                 self.assertEqual(left.status_code, 303)
                 self.assertEqual(client.get("/vacancies", follow_redirects=False).status_code, 303)

@@ -27,7 +27,7 @@ class VacancySourceTests(unittest.TestCase):
         self.assertEqual(safe_url(page, "/vacancies/1", "career.sibur.ru"),
                          "https://career.sibur.ru/vacancies/1")
 
-    def test_avito_requires_explicit_company_location_and_job_title(self):
+    def test_avito_all_employers_with_explicit_city_and_title(self):
         html = """<div data-marker="item"> <span>Тюмень</span>
           <span>АО Транснефть-Сибирь</span>
           <a data-marker="item-title" href="/tyumen/vakansii/2345">Специалист по охране труда</a>
@@ -37,8 +37,8 @@ class VacancySourceTests(unittest.TestCase):
           <a data-marker="item-title" href="/tyumen/vakansii/2346">Специалист по охране труда</a>
         </div>"""
         results = _avito_rows(html,"https://www.avito.ru/tyumen/vakansii?q=ot","Тюмень")
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["brand"], "Транснефть")
+        self.assertEqual(len(results), 2)
+        self.assertEqual({row["brand"] for row in results}, {"Транснефть", "Другие компании"})
 
     def test_denied_robots_is_not_bypassed(self):
         with patch("app.vacancy_sources.urlopen") as get:
