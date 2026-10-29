@@ -234,32 +234,52 @@ def parse_vacancy(item: dict, city: str) -> dict | None:
 
 
 def fetch_current_vacancies() -> dict[str, dict]:
-    ids = area_ids()
-    found = {}
-    for city, area_id in ids.items():
-        for term in SEARCH_TERMS:
-            for page in range(3):
-                response = hh_json("/vacancies", {
-                    "area": area_id,
-                    "text": term,
-                    "search_field": "name",
-                    "per_page": 100,
-                    "page": page,
-                    "order_by": "publication_time",
-                })
-                for item in response.get("items", []):
-                    vacancy = parse_vacancy(item, city)
-                    if vacancy:
-                        found[vacancy["source_id"]] = vacancy
-                # Incomplete scans must not mark omitted vacancies as archived.
-                if page + 1 >= int(response.get("pages", 0)):
-                    break
-                if page == 2:
-                    raise RuntimeError(f"Неполная выдача HH: {city}, запрос «{term}»")
-                time.sleep(0.25)
-            time.sleep(0.25)
-    return found
+    """Fetch every published HH job in two cities within the last 30 days.
 
+    HH caps one search at 2,000 records. Split the publication-date window
+    whenever its size exceeds that limit. If the window cannot be exhausted,
+    fail the source rather than inaccurately archiving unseen vacancies.
+    """
+    ids = area_ids()
+    found: dict[str, dict] = {}
+    end = now_utc()
+    start = end - timedelta(days=30)
+
+    def read_window(city: str, area_id: str, first: datetime, last: datetime, depth: int = 0):
+        params = {
+            "area": area_id,
+            "per_page": 100,
+            "page": 0,
+            "order_by": "publication_time",
+            "date_from": first.isoformat(timespec="seconds"),
+            "date_to": last.isoformat(timespec="seconds"),
+        }
+        response = hh_json("/vacancies", params)
+        pages = int(response.get("pages", 0))
+        count = int(response.get("found", 0))
+        if count > 2000 or pages > 20:
+            if (last - first) <= timedelta(minutes=10) or depth >= 22:
+                raise RuntimeError(f"HeadHunter: выдача {city} превышает лимит 2000 даже в минимальном интервале")
+            mid = first + (last - first) / 2
+            read_window(city, area_id, first, mid, depth + 1)
+            read_window(city, area_id, mid, last, depth + 1)
+            return
+        for item in response.get("items", []):
+            vacancy = parse_vacancy(item, city)
+            if vacancy:
+                found[vacancy["source_id"]] = vacancy
+        for page in range(1, pages):
+            params["page"] = page
+            more = hh_json("/vacancies", params)
+            for item in more.get("items", []):
+                vacancy = parse_vacancy(item, city)
+                if vacancy:
+                    found[vacancy["source_id"]] = vacancy
+            time.sleep(0.12)
+
+    for city, area_id in ids.items():
+        read_window(city, area_id, start, end)
+    return found
 
 def scan_once() -> tuple[str, int, str]:
     """Check enabled sources only; preserve the last good data on source errors."""
