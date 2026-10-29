@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, Depends, Query, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -150,7 +150,7 @@ def hh_json(endpoint: str, params: dict | None = None) -> dict | list:
     url = "https://api.hh.ru" + endpoint
     if params:
         url += "?" + urlencode(params)
-    request = Request(url, headers=headers)
+    request = UrlRequest(url, headers=headers)
     try:
         with urlopen(request, timeout=20) as response:
             return json.load(response)
