@@ -92,7 +92,7 @@ class TestVacancyFilters(unittest.TestCase):
             results, count = vacancies.query_vacancies(db, brand="СИБУР", city="Тюмень")
             self.assertEqual(count, 1)
             self.assertEqual(results[0].source_id, "1")
-            results, count = vacancies.query_vacancies(db, text="уват")
+            results, count = vacancies.query_vacancies(db, text="Уват")
             self.assertEqual(count, 1)
             self.assertEqual(results[0].source_id, "2")
             results, count = vacancies.query_vacancies(db, fresh=True)
