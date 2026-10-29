@@ -49,7 +49,7 @@ SOURCES = (
 AVITO_SOURCE = "avito.ru"
 AVITO_URLS = tuple(
     "https://www.avito.ru/" + loc + "/vakansii?" +
-    urlencode({"q": "охранa труда"})  # public search, no cookies or challenge handling
+    urlencode({"q": "охрана труда"})  # public search, no cookies or challenge handling
     for loc in ("tyumen", "nizhnevartovsk")
 )
 
@@ -235,7 +235,7 @@ def fetch_avito() -> dict[str, dict]:
     # Public pages only. Avito Job API is designed for the employer's own ads
     # and cannot legitimately be used to search all other companies' ads.
     result = {}
-    for city, page in zip(CITIES[::-1], AVITO_URLS):
+    for city, page in zip(CITIES, AVITO_URLS):
         _robots_allowed(page)
         html = _read_page(page)
         for entry in _avito_rows(html, page, city):
