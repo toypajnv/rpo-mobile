@@ -257,12 +257,3 @@ app.include_router(pb_mng_router)
 from .pb_mng_process import router as pb_mng_process_router
 app.include_router(pb_mng_process_router)
 
-
-# Separate career monitoring area; uses existing login and separate database tables.
-from .vacancies import router as vacancies_router
-app.include_router(vacancies_router)
-
-
-# Separate login for the vacancy monitoring application (does not grant RPO access).
-from .vacancy_auth import router as vacancy_auth_router
-app.include_router(vacancy_auth_router)
