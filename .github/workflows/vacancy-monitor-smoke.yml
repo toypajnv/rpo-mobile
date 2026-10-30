@@ -32,5 +32,27 @@ jobs:
             echo "Authenticated vacancy page is not deployed correctly" >&2
             exit 1
           fi
+      - name: Confirm correct vacancies build actually reached Timeweb
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='20261030-sibur-fix-v2'
+          deployed=0
+          for attempt in $(seq 1 45); do
+            # Query an unauthenticated page so CI does not need or expose credentials.
+            html="$(curl -fsS --max-time 10 -H 'Cache-Control: no-cache' \
+                'https://rpo-mng.ru/vacancies/login?deployment_check=20261030' 2>/dev/null || true)"
+            if [[ "$html" == *"name=\"vacancy-release\" content=\"$expected\""* ]]; then
+              echo "Verified deployed vacancy release: $expected (attempt $attempt)"
+              deployed=1
+              break
+            fi
+            echo "New vacancy build is not live yet; attempt $attempt/45"
+            sleep 10
+          done
+          if [[ "$deployed" != "1" ]]; then
+            echo "Deployment mismatch: vacancy server still serves old code despite route being healthy" >&2
+            exit 1
+          fi
       - name: Confirm RPO health is unchanged
         run: curl -fsS --max-time 10 https://rpo-mng.ru/health | grep -F '"status":"ok"'
