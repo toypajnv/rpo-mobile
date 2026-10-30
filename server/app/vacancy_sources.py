@@ -10,6 +10,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -27,6 +28,8 @@ EXCLUDE = re.compile(r"информационн.{0,15}безопасност|к�
 URL_HREF = re.compile(r"vacan|career|job|rabot|position|dolzhn|vakansi", re.I)
 AVITO_ITEM = re.compile(r"/(vakansii|vakansiya)/", re.I)
 MAX_BYTES = 2_000_000
+_ROBOTS_CACHE: dict[str, tuple[float, str | None]] = {}
+_ROBOTS_TTL = 24 * 3600
 
 
 @dataclass(frozen=True)
@@ -76,28 +79,97 @@ def _read_page(url: str, *, max_bytes: int = MAX_BYTES) -> str:
 
 
 def _robots_allowed(url: str) -> None:
+    """Check robots per RFC 9309: 404/410 are unavailable, 5xx/network are unreachable.
+
+    Never bypass explicit Disallow, authentication blocks or rate limits.
+    Retain a successful rule set for up to 24 hours on temporary failures.
+    """
     host = urlparse(url).netloc
-    robots_url = f"https://{host}/robots.txt"
-    try:
-        # Read robots even if it returns text/plain; never access a protected site
-        # when robots.txt is unavailable.
-        request = Request(robots_url, headers={"User-Agent": USER_AGENT})
-        with urlopen(request, timeout=12) as response:
-            if urlparse(response.geturl()).hostname != urlparse(url).hostname:
-                raise RuntimeError("robots.txt перенаправлен на другой домен")
-            content = response.read(150_000).decode("utf-8", errors="replace")
-    except HTTPError as exc:
-        if exc.code in (401, 403, 429):
-            raise RuntimeError(f"robots.txt: HTTP {exc.code}; сбор пропущен") from exc
-        if exc.code == 404:
-            return  # Standard robots.txt convention: no restrictions on 404
-        raise RuntimeError(f"robots.txt: HTTP {exc.code}") from exc
-    except (URLError, OSError, TimeoutError) as exc:
-        raise RuntimeError("robots.txt недоступен; сбор пропущен") from exc
-    robots = RobotFileParser()
-    robots.parse(content.splitlines())
-    if not robots.can_fetch(USER_AGENT, url):
+    stamp = time.monotonic()
+    cached = _ROBOTS_CACHE.get(host)
+    rules: str | None = None
+    if cached and stamp - cached[0] < _ROBOTS_TTL:
+        rules = cached[1]
+    else:
+        robots_url = f"https://{host}/robots.txt"
+        try:
+            request = Request(robots_url, headers={"User-Agent": USER_AGENT})
+            with urlopen(request, timeout=12) as response:
+                final = response.geturl()
+                if urlparse(final).hostname != urlparse(url).hostname:
+                    raise RuntimeError("robots.txt: перенаправление на другой домен; сбор пропущен")
+                rules = response.read(512_001).decode("utf-8", errors="replace")
+                if len(rules) > 512_000:
+                    raise RuntimeError("robots.txt: слишком большой файл")
+        except HTTPError as exc:
+            if exc.code in (404, 410):
+                rules = None  # RFC 9309: no robots at these paths -> unavailable
+            elif exc.code in (401, 403, 429):
+                raise RuntimeError(f"robots.txt: доступ ограничен HTTP {exc.code}; сбор пропущен") from exc
+            else:
+                if cached and stamp - cached[0] < _ROBOTS_TTL:
+                    rules = cached[1]
+                else:
+                    raise RuntimeError(f"robots.txt: HTTP {exc.code}; сбор пропущен") from exc
+        except (URLError, OSError, TimeoutError) as exc:
+            if cached and stamp - cached[0] < _ROBOTS_TTL:
+                rules = cached[1]
+            else:
+                raise RuntimeError("robots.txt: временно недоступен по сети; сбор пропущен") from exc
+        _ROBOTS_CACHE[host] = (stamp, rules)
+    if rules is None:
+        return
+    parser = RobotFileParser()
+    parser.parse(rules.splitlines())
+    if not parser.can_fetch(USER_AGENT, url):
         raise RuntimeError("Сбор запрещён robots.txt")
+
+
+# Index pages, regional navigation and directory URLs must not become jobs.
+NON_JOB_LABELS = re.compile(
+    r"^(?:все вакансии|найти вакансию|поиск вакансий|подробнее|"
+    r"тюмень|нижневартовск|тобольск|нижний новгород|нижнекамск|"
+    r"москва|санкт-петербург|казань|уфа|пермь|работа в|"
+    r"вакансии в|открытые вакансии|производство|бэк-офис|"
+    r"строительство|наука|маркетинг и продажи|работа|карьера)$", re.I
+)
+NON_JOB_PATHS = re.compile(
+    r"^(?:vacancies|vacancy|career|jobs?|cities|city|regions?|"
+    r"locations?|tobolsk|tyumen|nizhnevartovsk|nizhnekamsk|"
+    r"nizhniy-novgorod|nizhny-novgorod|moscow|kazan|ufa)$", re.I
+)
+JOB_WORDS = re.compile(
+    r"инженер|специалист|эксперт|мастер|оператор|механик|"
+    r"начальник|руководитель|директор|технолог|лаборант|"
+    r"водитель|слесарь|электромонт|бухгалтер|аналитик|"
+    r"менеджер|экономист|юрист|геолог|химик|машинист|"
+    r"программист|разработчик|стажер|стажёр|рабочий|"
+    r"контролер|контролёр|электрик|сварщик|аппаратчик", re.I
+)
+
+
+def looks_like_job(title: str, url: str, listing_page: str) -> bool:
+    """Fail closed for broad category/city links, even when they contain a city nearby."""
+    title = " ".join(title.split()).strip(" –—•")
+    if not 6 <= len(title) <= 160 or NON_JOB_LABELS.search(title):
+        return False
+    if not JOB_WORDS.search(title):
+        return False
+    dest = urlparse(url)
+    base = urlparse(listing_page)
+    if dest.scheme != "https" or dest.hostname != base.hostname:
+        return False
+    if dest.path.rstrip("/") == base.path.rstrip("/"):
+        return False
+    bits = [part.lower() for part in dest.path.strip("/").split("/") if part]
+    if not bits or NON_JOB_PATHS.fullmatch(bits[-1]):
+        return False
+    if any(item in ("cities", "city", "locations", "regions") for item in bits):
+        return False
+    if not URL_HREF.search(dest.path):
+        return False
+    # A generic page with a location/category as the last component is not a job.
+    return True
 
 
 def safe_url(page: str, href: str, allowed_host: str) -> str | None:
@@ -127,37 +199,37 @@ def _job(title: str) -> bool:
 
 
 def _listing_rows(html: str, page: str, source: Source) -> list[dict]:
+    """Collect only identifiable job-detail links with an explicit local city."""
     soup = BeautifulSoup(html, "html.parser")
-    offers = []
+    offers: list[dict] = []
+    seen: set[str] = set()
     for anchor in soup.find_all("a", href=True):
-        title = anchor.get_text(" ", strip=True)
-        if len(title) < 8 or len(title) > 220:
+        if anchor.find_parent(["nav", "header", "footer"]):
             continue
+        title = " ".join(anchor.get_text(" ", strip=True).split())
         url = safe_url(page, anchor["href"], source.allowed_host)
-        if not url or not URL_HREF.search(urlparse(url).path):
+        if not url or not looks_like_job(title, url, page):
             continue
-        # Ancestor must include the city but not the whole page. Never infer
-        # a location from the search-filter panel or from the employer HQ.
         city = None
         parent = anchor
         for _ in range(4):
             parent = parent.parent
-            if parent is None or getattr(parent, "name", None) in {"body", "html"}:
+            if parent is None or getattr(parent, "name", None) in {"body", "html", "nav"}:
                 break
-            nearby = parent.get_text(" ", strip=True)[:700]
-            if len(nearby) > 900:
+            nearby = parent.get_text(" ", strip=True)
+            if len(nearby) > 450:
                 break
             city = _city(nearby)
             if city:
                 break
-        if not city:
+        if not city or url in seen:
             continue
-        employer = source.company
+        seen.add(url)
         offers.append({
             "source": source.name,
             "source_id": slug_id(url),
             "brand": source.company,
-            "employer": employer,
+            "employer": source.company,
             "title": title,
             "city": city,
             "url": url,
@@ -166,6 +238,7 @@ def _listing_rows(html: str, page: str, source: Source) -> list[dict]:
             "published_at": datetime.now(timezone.utc),
         })
     return offers
+
 
 
 def _novatek_rows(html: str, page: str) -> list[dict]:
