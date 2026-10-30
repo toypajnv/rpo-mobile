@@ -408,9 +408,24 @@ def ru_date(value: datetime | None) -> str:
     return value.astimezone(RU_TIME).strftime("%d.%m.%Y %H:%M")
 
 
+BOGUS_SIBUR_CITY_TITLES = (
+    "Тобольск", "Нижний Новгород", "Нижнекамск", "Тюмень",
+    "Москва", "Казань", "Уфа", "Пермь", "Санкт-Петербург",
+)
+
+
+def genuine_vacancy_filter():
+    """Hide legacy Sibur navigation links until the next successful source refresh."""
+    return ~(
+        (TrackedVacancy.source == "career.sibur.ru")
+        & TrackedVacancy.title.in_(BOGUS_SIBUR_CITY_TITLES)
+    )
+
+
 def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = "", fresh: bool = False, page: int = 1, source: str = "", specialty: str = ""):
     query = select(TrackedVacancy).where(
-        TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
+        TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db)),
+        genuine_vacancy_filter()
     )
     if brand in BRANDS:
         query = query.where(TrackedVacancy.brand == brand)
@@ -561,6 +576,7 @@ def vacancy_page(
         return RedirectResponse("/vacancies/login", status_code=303)
     if not request.session.get("vacancies_source_csrf"):
         request.session["vacancies_source_csrf"] = secrets.token_urlsafe(24)
+    init_tables()  # Ensure new refresh-request table exists before first page view.
     operator = SimpleNamespace(username="admin")
     disabled_sources = disabled_source_names(db)
     vacancies, total = query_vacancies(db, brand, city, q.strip(), new, page, source, specialty)
@@ -574,6 +590,7 @@ def vacancy_page(
         select(func.count()).select_from(TrackedVacancy).where(
             TrackedVacancy.active.is_(True),
             TrackedVacancy.source.in_(enabled_source_names(db)),
+            genuine_vacancy_filter(),
             TrackedVacancy.first_seen_at >= now_utc() - timedelta(hours=24),
         )
     ) or 0
