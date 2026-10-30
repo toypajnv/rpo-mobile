@@ -155,6 +155,30 @@ class TestVacancyFilters(unittest.TestCase):
             self.assertEqual(count, 2)
 
 
+    def test_legacy_sibur_city_links_are_not_vacancies(self):
+        """Previously imported navigation links must be hidden immediately."""
+        engine = create_engine("sqlite://")
+        vacancies.TrackedVacancy.__table__.create(engine)
+        vacancies.VacancySourceSetting.__table__.create(engine)
+        now = datetime.now(timezone.utc)
+        with Session(engine) as db:
+            for idx, (title, url) in enumerate((
+                ("Тобольск", "https://career.sibur.ru/vacancies/tobolsk/"),
+                ("  Нижний Новгород  ", "https://career.sibur.ru/vacancies/nizhniy-novgorod/"),
+                ("Ведущий специалист по охране труда", "https://career.sibur.ru/vacancies/vedushchiy-spetsialist/"),
+            ), 1):
+                db.add(vacancies.TrackedVacancy(
+                    source="career.sibur.ru", source_id=f"test-{idx}",
+                    brand="СИБУР", employer="СИБУР", city="Тюмень",
+                    title=title, url=url, published_at=now,
+                    first_seen_at=now, last_seen_at=now, active=True,
+                ))
+            db.commit()
+            rows, total = vacancies.query_vacancies(db)
+            self.assertEqual(total, 1)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].title, "Ведущий специалист по охране труда")
+
     def test_page_requires_separate_vacancy_login(self):
         from fastapi.testclient import TestClient
         from app.main import app
