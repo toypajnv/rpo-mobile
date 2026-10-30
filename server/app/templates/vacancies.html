@@ -109,6 +109,20 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
 .manual-grid input{height:43px;width:100%;box-sizing:border-box;border:1px solid #d8e0e9;border-radius:10px;padding:0 12px;font:inherit;font-size:12px}
 @media(max-width:1000px){.manual-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-grid label:first-child{grid-column:span 2}}
 @media(max-width:740px){.filters-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.filters-grid .query{grid-column:span 2}.manual-grid{grid-template-columns:1fr}.manual-grid label:first-child{grid-column:span 1}}
+
+.metric-link{display:block;text-decoration:none;color:inherit;transition:border-color .15s,box-shadow .15s}
+.metric-link:hover,.metric-link:focus-visible{border-color:#85b0d1;box-shadow:0 5px 16px #13416418}
+.metric-link .foot{color:#28618e;font-weight:650}
+.refresh-panel{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff;border:1px solid #dbe6ef;border-radius:17px;padding:17px 22px;margin-bottom:20px}
+.refresh-panel b{font-size:15px}.refresh-panel p{margin:6px 0;color:#64768a;font-size:12px;line-height:1.5}
+.refresh-panel form{margin:0;flex-shrink:0}
+.refresh-button{background:#1a5c91;color:white;border:0;border-radius:11px;padding:13px 20px;font:inherit;font-size:13px;font-weight:750;cursor:pointer}
+.refresh-button:disabled{opacity:.55;cursor:not-allowed}
+.refresh-progress,.refresh-done{display:block;font-size:12px;margin-top:8px;color:#a05b22}
+.refresh-done{color:#56798f}
+#vacancies-list,#source-status{scroll-margin-top:14px}
+@media(max-width:740px){.refresh-panel{align-items:stretch;flex-direction:column;padding:15px}.refresh-panel form,.refresh-button{width:100%}}
+
 </style>
 </head>
 <body>
@@ -141,10 +155,29 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
   </div>
 
   <div class="metrics">
-    <div class="metric"><div class="kicker">Актуальных вакансий</div><strong>{{ active_count }}</strong><div class="foot">Все работодатели в двух городах</div></div>
-    <div class="metric"><div class="kicker">Новых за 24 часа</div><strong>{{ new_count }}</strong><div class="foot">Впервые найдены мониторингом</div></div>
-    <div class="metric"><div class="kicker">Периодичность</div><strong>60 <span style="font-size:16px">мин</span></strong><div class="foot">Автоматическая проверка</div></div>
+    <a class="metric metric-link" href="/vacancies#vacancies-list" aria-label="Показать все актуальные вакансии"><div class="kicker">Актуальных вакансий</div><strong>{{ active_count }}</strong><div class="foot">Открыть список всех вакансий ↓</div></a>
+    <a class="metric metric-link" href="/vacancies?new=true#vacancies-list" aria-label="Показать новые вакансии за 24 часа"><div class="kicker">Новых за 24 часа</div><strong>{{ new_count }}</strong><div class="foot">Показать только новые ↓</div></a>
+    <a class="metric metric-link" href="#source-status" aria-label="Открыть статусы проверки источников"><div class="kicker">Периодичность</div><strong>60 <span style="font-size:16px">мин</span></strong><div class="foot">Проверить состояние источников ↓</div></a>
   </div>
+
+  <section class="refresh-panel" aria-label="Обновление вакансий">
+    <div>
+      <b>Проверка источников</b>
+      <p>Опрос автоматически выполняется каждый час. Можно запустить дополнительную проверку вручную.</p>
+      {% if latest_refresh and latest_refresh.state in ("queued", "running") %}
+        <span class="refresh-progress">⏳ {{ "Проверка выполняется" if latest_refresh.state == "running" else "Проверка поставлена в очередь" }}. Страница обновится автоматически.</span>
+      {% elif latest_refresh and latest_refresh.state in ("done", "partial", "error") %}
+        <span class="refresh-done">Последний ручной запуск: {{ ru_date(latest_refresh.finished_at) }} · {{ "завершён" if latest_refresh.state == "done" else "частично выполнен" if latest_refresh.state == "partial" else "ошибка" }}</span>
+      {% endif %}
+      {% if request.query_params.get("refresh") == "limited" %}
+        <span class="refresh-progress">Повторный запуск доступен через 3 минуты после предыдущего запроса.</span>
+      {% endif %}
+    </div>
+    <form method="post" action="/vacancies/refresh">
+      <input type="hidden" name="csrf_token" value="{{ source_csrf }}">
+      <button class="refresh-button" type="submit" {% if latest_refresh and latest_refresh.state in ("queued", "running") %}disabled{% endif %}>↻ Проверить сейчас</button>
+    </form>
+  </section>
 
   {% if scan and scan.status in ('error', 'partial') %}
   <div class="notice"><b>Некоторые источники недоступны.</b> Успешные источники обновлены. Данные недоступных источников сохранены без изменений.<br>
@@ -160,7 +193,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
   {% if request.query_params.get("sources") == "updated" %}
 <div class="source-hint">Настройки источников сохранены. Исключённые сайты сразу скрыты из списка. Поиск по остальным продолжится при следующем почасовом обходе.</div>
 {% endif %}
-<form class="sources-settings" action="/vacancies/sources" method="post">
+<form id="source-status" class="sources-settings" action="/vacancies/sources" method="post">
   <input type="hidden" name="csrf_token" value="{{ source_csrf }}">
   <h2>Исключить сайты из автоматического поиска</h2>
   <p class="sources-desc">Отметьте галочкой сайты, которые <b>не нужно проверять</b>. Ошибка одного источника не мешает остальным. Выбор сохранится на сервере.</p>
@@ -245,7 +278,7 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
       <button class="primary" type="submit">Сохранить вакансию</button>
     </div>
   </form>
-  <div class="list-top">
+  <div class="list-top" id="vacancies-list">
     <h2>Найденные вакансии</h2>
     <span>Показано {{ vacancies|length }} из {{ total }}</span>
   </div>
@@ -297,5 +330,8 @@ button.primary{height:43px;border:0;border-radius:10px;color:#fff;background:#21
     Вакансия может быть закрыта работодателем между проверками.
   </p>
 </main>
+{% if latest_refresh and latest_refresh.state in ("queued", "running") %}
+<script>setTimeout(function(){location.reload()},8000);</script>
+{% endif %}
 </body>
 </html>
