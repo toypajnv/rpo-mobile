@@ -1,7 +1,8 @@
 """Public source parsing must fail closed and never fabricate unverified listings."""
 import unittest
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
-from app.vacancy_sources import Source, _listing_rows, _avito_rows, safe_url, collect_sources, _robots_allowed, _novatek_rows
+from app.vacancy_sources import Source, _listing_rows, _avito_rows, safe_url, collect_sources, _robots_allowed, _novatek_rows, _ROBOTS_CACHE
 
 class VacancySourceTests(unittest.TestCase):
     def test_novatek_extracts_one_real_job_not_its_description(self):
@@ -35,6 +36,67 @@ class VacancySourceTests(unittest.TestCase):
             <h3>Руководитель инновационных технологических проектов</h3>
             <p>Требуемый опыт работы: не менее 7 лет</p>"""
         self.assertEqual(len(_novatek_rows(block + block, "https://www.novatek.ru/ru/about/career/jobs/")), 1)
+    def test_sibur_navigation_cities_do_not_become_job_cards(self):
+        sample = """
+        <main><nav><a href="/vacancies/tobolsk/">Тобольск</a></nav>
+        <article><span>Тюмень</span>
+          <a href="/vacancies/tobolsk/">Тобольск</a>
+        </article>
+        <article><span>Тюмень</span>
+          <a href="/vacancies/nizhniy-novgorod/">Нижний Новгород</a>
+        </article>
+        <article><span>Тюмень</span>
+          <a href="/vacancies/job/922">Ведущий специалист по охране труда</a>
+        </article>
+        </main>
+        """
+        source = Source(
+            "career.sibur.ru", "СИБУР",
+            ("https://career.sibur.ru/vacancies/",), "career.sibur.ru"
+        )
+        rows = _listing_rows(sample, source.pages[0], source)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["title"], "Ведущий специалист по охране труда")
+        self.assertEqual(rows[0]["url"], "https://career.sibur.ru/vacancies/job/922")
+        self.assertEqual(rows[0]["city"], "Тюмень")
+
+    def test_sibur_listing_never_links_to_category(self):
+        source = Source(
+            "career.sibur.ru", "СИБУР",
+            ("https://career.sibur.ru/vacancies/",), "career.sibur.ru"
+        )
+        sample = """<article><span>Тюмень</span>
+            <a href="/vacancies/?city=tyumen">Инженер по охране труда</a>
+        </article>"""
+        self.assertEqual(_listing_rows(sample, source.pages[0], source), [])
+
+    def test_robots_missing_404_allows_but_500_blocks(self):
+        url = "https://siberia.transneft.ru/vacancies/"
+        _ROBOTS_CACHE.pop("siberia.transneft.ru", None)
+        with patch("app.vacancy_sources.urlopen", side_effect=HTTPError(
+            url, 404, "Not Found", None, None
+        )):
+            _robots_allowed(url)
+        _ROBOTS_CACHE.pop("siberia.transneft.ru", None)
+        with patch("app.vacancy_sources.urlopen", side_effect=HTTPError(
+            url, 503, "Service Unavailable", None, None
+        )):
+            with self.assertRaisesRegex(RuntimeError, "503"):
+                _robots_allowed(url)
+
+    def test_robots_transient_failure_uses_recent_cached_rules(self):
+        url = "https://siberia.transneft.ru/vacancies/job/one"
+        _ROBOTS_CACHE.pop("siberia.transneft.ru", None)
+        with patch("app.vacancy_sources.urlopen") as fetch:
+            response = fetch.return_value.__enter__.return_value
+            response.geturl.return_value = "https://siberia.transneft.ru/robots.txt"
+            response.read.return_value = b"User-agent: *\nAllow: /\n"
+            _robots_allowed(url)
+        # A recent cached robots policy permits a scan during transient outage.
+        with patch("app.vacancy_sources.urlopen", side_effect=URLError("offline")):
+            _robots_allowed(url)
+        _ROBOTS_CACHE.pop("siberia.transneft.ru", None)
+
     def test_official_gazprom_listing_requires_city_and_title(self):
         html = """<html><body>
           <article><span>Тюменская область, г. Тюмень</span>
