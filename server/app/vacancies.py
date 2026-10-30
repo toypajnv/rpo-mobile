@@ -118,6 +118,22 @@ class VacancySourceStatus(Base):
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class VacancyRefreshRequest(Base):
+    __tablename__ = "vacancy_refresh_requests"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    state: Mapped[str] = mapped_column(String(20), default="queued")
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+def last_refresh_request(db: Session) -> VacancyRefreshRequest | None:
+    return db.scalar(select(VacancyRefreshRequest).order_by(VacancyRefreshRequest.id.desc()).limit(1))
+
+
+
+
 def disabled_source_names(db: Session) -> set[str]:
     return {
         name for name in db.scalars(
@@ -132,7 +148,7 @@ def enabled_source_names(db: Session) -> tuple[str, ...]:
 
 def init_tables() -> None:
     Base.metadata.create_all(engine, tables=[TrackedVacancy.__table__, VacancyScan.__table__,
-                                          VacancySourceSetting.__table__, VacancySourceStatus.__table__])
+                                          VacancySourceSetting.__table__, VacancySourceStatus.__table__, VacancyRefreshRequest.__table__])
 
 
 def company_brand(company: str) -> str | None:
@@ -421,6 +437,40 @@ def query_vacancies(db: Session, brand: str = "", city: str = "", text: str = ""
     return vacancies, total
 
 
+@router.post("/vacancies/refresh", include_in_schema=False)
+def request_vacancy_refresh(
+    request: Request,
+    csrf_token: Annotated[str, Form()],
+    db: Session = Depends(get_db),
+):
+    """Queue an immediate scan; HTTP handler never scans external sites."""
+    from .vacancy_auth import vacancy_logged_in
+    if not vacancy_logged_in(request):
+        return RedirectResponse("/vacancies/login", status_code=303)
+    token = request.session.get("vacancies_source_csrf", "")
+    if not token or not hmac.compare_digest(token, csrf_token):
+        raise HTTPException(status_code=403, detail="Неверный токен формы")
+    init_tables()
+    latest = last_refresh_request(db)
+    stamp = now_utc()
+    if latest:
+        if latest.state in ("queued", "running") and (
+            latest.started_at is None or (
+                stamp - (latest.started_at.replace(tzinfo=timezone.utc)
+                if latest.started_at.tzinfo is None else latest.started_at)
+            ) < timedelta(minutes=30)
+        ):
+            return RedirectResponse("/vacancies?refresh=queued#source-status", status_code=303)
+        issued = latest.created_at
+        if issued.tzinfo is None:
+            issued = issued.replace(tzinfo=timezone.utc)
+        if stamp - issued < timedelta(minutes=3):
+            return RedirectResponse("/vacancies?refresh=limited#source-status", status_code=303)
+    db.add(VacancyRefreshRequest(created_at=stamp, state="queued"))
+    db.commit()
+    return RedirectResponse("/vacancies?refresh=queued#source-status", status_code=303)
+
+
 @router.post("/vacancies/sources", include_in_schema=False)
 def update_vacancy_sources(
     request: Request,
@@ -528,6 +578,7 @@ def vacancy_page(
         )
     ) or 0
     statuses = {v.source: v for v in db.scalars(select(VacancySourceStatus))}
+    latest_refresh = last_refresh_request(db)
     from .main_core import templates
     return templates.TemplateResponse(
         request=request, name="vacancies.html",
@@ -540,6 +591,7 @@ def vacancy_page(
             "sources": SOURCES_FILTER, "source": source,
             "disabled_sources": disabled_sources, "source_statuses": statuses,
             "source_csrf": request.session["vacancies_source_csrf"],
+            "latest_refresh": latest_refresh,
             "brand": brand, "city": city, "q": q, "new": new,
             "page": page, "page_count": (total + 49) // 50, "ru_date": ru_date,
             "new_since": now_utc() - timedelta(hours=24),
