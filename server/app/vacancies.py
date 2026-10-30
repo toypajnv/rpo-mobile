@@ -418,7 +418,7 @@ def genuine_vacancy_filter():
     """Hide legacy Sibur navigation links until the next successful source refresh."""
     return ~(
         (TrackedVacancy.source == "career.sibur.ru")
-        & TrackedVacancy.title.in_(BOGUS_SIBUR_CITY_TITLES)
+        & func.trim(TrackedVacancy.title).in_(BOGUS_SIBUR_CITY_TITLES)
     )
 
 
@@ -583,7 +583,8 @@ def vacancy_page(
     last_scan = db.scalar(select(VacancyScan).order_by(VacancyScan.id.desc()).limit(1))
     active_count = db.scalar(
         select(func.count()).select_from(TrackedVacancy).where(
-            TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db))
+            TrackedVacancy.active.is_(True), TrackedVacancy.source.in_(enabled_source_names(db)),
+            genuine_vacancy_filter()
         )
     ) or 0
     new_count = db.scalar(
