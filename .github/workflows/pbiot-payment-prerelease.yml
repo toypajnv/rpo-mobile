@@ -1,0 +1,48 @@
+name: Publish PBiOT Android signed payment preview
+on:
+  push:
+    branches: [pbiot-payment-rc2]
+    paths:
+      - ".github/workflows/pbiot-payment-prerelease.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build-signed-apk-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble previously signed APK and independently verify hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          count="$(find pbiot-preview-rc2/base64 -type f -name 'part-*.txt' | wc -l)"
+          test "$count" -eq 15
+          cat pbiot-preview-rc2/base64/part-*.txt | base64 --decode > PBiOT_Android_1.1_RC2_signed.apk
+          test "$(stat -c '%s' PBiOT_Android_1.1_RC2_signed.apk)" -eq 4999695
+          test "$(sha256sum PBiOT_Android_1.1_RC2_signed.apk | cut -d ' ' -f 1)" = "b682b1e00ceba9c38452a51bf02e929c671a5881a3dd95e54298cd6224946235"
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          p="PBiOT_Android_1.1_RC2_signed.apk"
+          with ZipFile(p) as z:
+              assert z.testzip() is None
+              paths=set(z.namelist())
+              assert "assets/pbiot_sample_v101.sqlite" in paths
+              assert "assets/pbiot_study_v100.sqlite" not in paths
+              assert "assets/pbiot_full_source_v054.sqlite" not in paths
+              assert not any(s.endswith((".jks",".p12",".env")) for s in paths)
+          print("PBIOT_APK_BINARY_SHA256_VALID; NO_FULL_BANK_OR_SECRETS")
+          PY
+      - name: Publish publicly downloadable preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create pbiot-v1.1.0-rc2-test PBiOT_Android_1.1_RC2_signed.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "ПБиОТ 1.1 RC2 — проверка оплаты ЮKassa" \
+            --notes-file pbiot-preview-rc2/README.md \
+            --prerelease
