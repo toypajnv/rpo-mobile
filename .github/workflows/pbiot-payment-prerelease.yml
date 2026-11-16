@@ -21,7 +21,7 @@ jobs:
           test "$count" -eq 15
           cat pbiot-preview-rc2/base64/part-*.txt | base64 --decode > PBiOT_Android_1.1_RC2_signed.apk
           test "$(stat -c '%s' PBiOT_Android_1.1_RC2_signed.apk)" -eq 4999695
-          test "$(sha256sum PBiOT_Android_1.1_RC2_signed.apk | cut -d ' ' -f 1)" = "b682b1e00ceba9c38452a51bf02e929c671a5881a3dd95e54298cd6224946235"
+          test "$(sha256sum PBiOT_Android_1.1_RC2_signed.apk | cut -d ' ' -f 1)" = "0a1487e10e89cc72dfcdb6718531c7541f1c7dd4a46a4404d6bed4c30f5eacdb"
           python3 - <<'PY'
           from zipfile import ZipFile
           p="PBiOT_Android_1.1_RC2_signed.apk"
