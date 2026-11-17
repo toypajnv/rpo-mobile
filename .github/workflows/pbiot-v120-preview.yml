@@ -1,0 +1,59 @@
+name: Publish PBiOT 1.2 universal exams preview
+on:
+  push:
+    branches: [pbiot-universal-rc3]
+    paths:
+      - ".github/workflows/pbiot-v120-preview.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble previously signed Android APK and verify integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find pbiot-v120-preview/base64 -type f -name 'part-*.txt' | wc -l)" -eq 15
+          cat pbiot-v120-preview/base64/part-*.txt | base64 --decode > PBiOT_Android_1.2_RC3_signed.apk
+          test "$(stat -c '%s' PBiOT_Android_1.2_RC3_signed.apk)" -eq 5012051
+          echo "bffe6f5a2ad21f50732b0a4edfafc540b3174906a21a305566589e1263b7cb16  PBiOT_Android_1.2_RC3_signed.apk" | sha256sum --check --status
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          import json,sqlite3,tempfile,os
+          f="PBiOT_Android_1.2_RC3_signed.apk"
+          with ZipFile(f) as z:
+              assert z.testzip() is None
+              entries=set(z.namelist())
+              assert "assets/pbiot_sample_v101.sqlite" in entries
+              assert "assets/exams_v120.json" in entries
+              assert "assets/pbiot_study_v100.sqlite" not in entries
+              assert "assets/pbiot_full_source_v054.sqlite" not in entries
+              assert not any(x.endswith((".env",".jks",".p12",".pem",".key")) for x in entries)
+              exam=json.loads(z.read("assets/exams_v120.json"))
+              assert len(exam["programs"])==118
+              assert exam["official_answer_keys_confirmed"]==0
+              with tempfile.NamedTemporaryFile(suffix=".sqlite") as tmp:
+                  tmp.write(z.read("assets/pbiot_sample_v101.sqlite"))
+                  tmp.flush()
+                  c=sqlite3.connect(tmp.name)
+                  assert c.execute("SELECT COUNT(*) FROM catalog").fetchone()[0]==500
+                  c.close()
+          print("VERIFIED_RC3_118_PROGRAMS_500_SAMPLES_NO_SECRETS")
+          PY
+      - name: Publish prerelease for signed RC3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create pbiot-v1.2.0-rc3-preview \
+            PBiOT_Android_1.2_RC3_signed.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "ПБиОТ 1.2 RC3 — универсальные программы и тренировка" \
+            --notes-file pbiot-v120-preview/README.md \
+            --prerelease
